@@ -847,6 +847,7 @@ anv_cmd_buffer_bind_descriptor_set(struct anv_cmd_buffer *cmd_buffer,
    case VK_PIPELINE_BIND_POINT_GRAPHICS:
       stages &= VK_SHADER_STAGE_ALL_GRAPHICS;
       pipe_state = &cmd_buffer->state.gfx.base;
+      gpgpusim_setDescriptorSet(set);
       break;
 
    case VK_PIPELINE_BIND_POINT_COMPUTE:

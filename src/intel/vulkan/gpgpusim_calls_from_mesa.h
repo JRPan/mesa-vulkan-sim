@@ -49,6 +49,7 @@ extern void gpgpusim_vkCmdTraceRaysKHR(
                       uint32_t launch_height,
                       uint32_t launch_depth,
                       uint64_t launch_size_addr);
+extern void gpgpusim_vkCmdDraw();
 
 extern void gpgpusim_setDescriptor(uint32_t setID, uint32_t descID, void *address, uint32_t size, VkDescriptorType type);
 extern void gpgpusim_setDescriptorSet(struct anv_descriptor_set *set);

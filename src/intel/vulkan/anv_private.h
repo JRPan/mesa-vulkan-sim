@@ -2993,6 +2993,11 @@ struct anv_TraceRayCall {
    uint64_t launch_size_addr;
 };
 
+struct anv_DrawCall {
+   bool valid;
+   void * vb;
+};
+
 struct anv_cmd_buffer {
    struct vk_object_base                        base;
 
@@ -3049,6 +3054,7 @@ struct anv_cmd_buffer {
    uint64_t                                     intel_perf_marker;
 
    struct anv_TraceRayCall traceRayCall;
+   struct anv_DrawCall traceDrawCall;
 };
 
 VkResult anv_cmd_buffer_init_batch_bo_chain(struct anv_cmd_buffer *cmd_buffer);

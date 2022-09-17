@@ -3791,6 +3791,10 @@ void genX(CmdDraw)(
    }
 
    update_dirty_vbs_for_gen8_vb_flush(cmd_buffer, SEQUENTIAL);
+
+
+   cmd_buffer->traceDrawCall.valid = true;
+   // void *raygen_addr = find_host_address(cmd_buffer->device, raygen_sbt->deviceAddress);
 }
 
 void genX(CmdDrawIndexed)(
@@ -3842,6 +3846,9 @@ void genX(CmdDrawIndexed)(
    }
 
    update_dirty_vbs_for_gen8_vb_flush(cmd_buffer, RANDOM);
+
+   cmd_buffer->traceDrawCall.valid = true;
+   // void *raygen_addr = find_host_address(cmd_buffer->device, raygen_sbt->deviceAddress);
 }
 
 /* Auto-Draw / Indirect Registers */
