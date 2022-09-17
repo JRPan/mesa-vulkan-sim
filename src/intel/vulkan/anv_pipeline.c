@@ -1348,6 +1348,7 @@ anv_pipeline_init_from_cached_graphics(struct anv_graphics_pipeline *pipeline)
    }
    pipeline->use_primitive_replication = pos_slots > 1;
 }
+static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath);
 
 static VkResult
 anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
@@ -1542,6 +1543,7 @@ anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
 
    /* Walk backwards to link */
    struct anv_pipeline_stage *next_stage = NULL;
+   char shaderPaths[20][200];
    for (int s = ARRAY_SIZE(pipeline->shaders) - 1; s >= 0; s--) {
       if (!stages[s].entrypoint)
          continue;
@@ -1549,6 +1551,7 @@ anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
       switch (s) {
       case MESA_SHADER_VERTEX:
          anv_pipeline_link_vs(compiler, &stages[s], next_stage);
+         translate_nir_to_ptx(stages[s].nir, shaderPaths[s]);
          break;
       case MESA_SHADER_TESS_CTRL:
          anv_pipeline_link_tcs(compiler, &stages[s], next_stage);
@@ -1561,6 +1564,7 @@ anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
          break;
       case MESA_SHADER_FRAGMENT:
          anv_pipeline_link_fs(compiler, &stages[s]);
+         translate_nir_to_ptx(stages[s].nir, shaderPaths[s]);
          break;
       default:
          unreachable("Invalid graphics shader stage");
@@ -2559,6 +2563,12 @@ static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath)
          break;
       case MESA_SHADER_CALLABLE:
          strcpy(fileName, "MESA_SHADER_CALLABLE");
+         break;
+      case MESA_SHADER_VERTEX:
+         strcpy(fileName, "MESA_SHADER_VERTEX");
+         break;
+      case MESA_SHADER_FRAGMENT:
+         strcpy(fileName, "MESA_SHADER_FRAGMENT");
          break;
       default:
          unreachable("Invalid shader type");
