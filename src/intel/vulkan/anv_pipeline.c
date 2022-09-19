@@ -1350,6 +1350,22 @@ anv_pipeline_init_from_cached_graphics(struct anv_graphics_pipeline *pipeline)
 }
 static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath);
 
+static void run_rt_translation_passes()
+{
+   char *mesa_root = getenv("MESA_ROOT");
+   char *filePath = "gpgpusimShaders/";
+
+   char command[400];
+   snprintf(command, sizeof(command), "python3 %s/src/compiler/ptx/ptx_lower_instructions.py %s%s", mesa_root, mesa_root, filePath);
+   int result = system(command);
+
+   if (result != 0)
+   {
+      printf("MESA: ERROR ** while translating nir to PTX %d\n", result);
+      exit(1);
+   }
+}
+
 static VkResult
 anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
                               struct anv_pipeline_cache *cache,
@@ -1435,9 +1451,11 @@ anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
       memcpy(stages[s].cache_key.sha1, sha1, sizeof(sha1));
    }
 
-   const bool skip_cache_lookup =
-      (pipeline->base.flags & VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR);
+   // const bool skip_cache_lookup =
+   //    (pipeline->base.flags & VK_PIPELINE_CREATE_CAPTURE_INTERNAL_REPRESENTATIONS_BIT_KHR);
 
+   // skip so PTX is compiled everytime
+   bool skip_cache_lookup = true;
    if (!skip_cache_lookup) {
       unsigned found = 0;
       unsigned cache_hits = 0;
@@ -1572,7 +1590,22 @@ anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
 
       next_stage = &stages[s];
    }
+   run_rt_translation_passes();
+   // VERTEX 
+   assert(stages[0].stage == MESA_SHADER_VERTEX);
+   stages[0].bin = (void *)gpgpusim_registerShader(shaderPaths[0], (uint32_t)(stages[0].stage));
+   assert((uint64_t)(stages[0].bin) == 0);
 
+   // FRAG
+   assert(stages[4].stage == MESA_SHADER_FRAGMENT);
+   stages[4].bin = (void *)gpgpusim_registerShader(shaderPaths[4], (uint32_t)(stages[4].stage));
+   assert((uint64_t)(stages[4].bin) == 1);
+   // for (uint32_t i = 0; i < info->stageCount; i++)
+   //    if((stages[i].stage == MESA_SHADER_VERTEX ||
+   //        stages[i].stage == MESA_SHADER_FRAGMENT) && stages[i].module) {
+   //       stages[i].bin = (void *)gpgpusim_registerShader(shaderPaths[i], (uint32_t)(stages[i].stage));
+   //       assert((uint64_t)(stages[i].bin) == i);
+   // }
    if (pipeline->base.device->info.gen >= 12 &&
        pipeline->subpass->view_mask != 0) {
       /* For some pipelines HW Primitive Replication can be used instead of
@@ -2539,6 +2572,7 @@ static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath)
    char fileName[50];
    char *label; // in case there are multiple variants of the same shader
    char *extension = ".ptx";
+   int id = 0;
    
    label = shader->info.label;
    if (!label){
@@ -2548,34 +2582,43 @@ static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath)
    switch (shader->info.stage) {
       case MESA_SHADER_RAYGEN:
          strcpy(fileName, "MESA_SHADER_RAYGEN");
+         id = shader_ID;
          break;
       case MESA_SHADER_ANY_HIT:
          strcpy(fileName, "MESA_SHADER_ANY_HIT");
+         id = shader_ID;
          break;
       case MESA_SHADER_CLOSEST_HIT:
          strcpy(fileName, "MESA_SHADER_CLOSEST_HIT");
+         id = shader_ID;
          break;
       case MESA_SHADER_MISS:
          strcpy(fileName, "MESA_SHADER_MISS");
+         id = shader_ID;
          break;
       case MESA_SHADER_INTERSECTION:
          strcpy(fileName, "MESA_SHADER_INTERSECTION");
+         id = shader_ID;
          break;
       case MESA_SHADER_CALLABLE:
          strcpy(fileName, "MESA_SHADER_CALLABLE");
+         id = shader_ID;
          break;
       case MESA_SHADER_VERTEX:
          strcpy(fileName, "MESA_SHADER_VERTEX");
+         id = shader_ID - 1;
          break;
       case MESA_SHADER_FRAGMENT:
          strcpy(fileName, "MESA_SHADER_FRAGMENT");
+         id = shader_ID + 1;
          break;
       default:
          unreachable("Invalid shader type");
    }
 
+   shader_ID++;
    char fullPath[200];
-   snprintf(fullPath, sizeof(fullPath), "%s%s%s_%d%s", mesa_root, filePath, fileName, shader_ID++, extension);
+   snprintf(fullPath, sizeof(fullPath), "%s%s%s_%d%s", mesa_root, filePath, fileName, id, extension);
    
    char command[200];
 
@@ -2598,22 +2641,6 @@ static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath)
    //    nir_print_shader(shader, stderr);
    //    nir_translate_shader_to_ptx(shader, stderr, NULL);
    // }
-}
-
-static void run_rt_translation_passes()
-{
-   char *mesa_root = getenv("MESA_ROOT");
-   char *filePath = "gpgpusimShaders/";
-
-   char command[400];
-   snprintf(command, sizeof(command), "python3 %s/src/compiler/ptx/ptx_lower_instructions.py %s%s", mesa_root, mesa_root, filePath);
-   int result = system(command);
-
-   if (result != 0)
-   {
-      printf("MESA: ERROR ** while translating nir to PTX %d\n", result);
-      exit(1);
-   }
 }
 
 

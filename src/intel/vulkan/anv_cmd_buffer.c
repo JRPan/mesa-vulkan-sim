@@ -262,6 +262,7 @@ static VkResult anv_create_cmd_buffer(
    cmd_buffer->level = level;
    
    cmd_buffer->traceRayCall.valid = false;
+   cmd_buffer->traceDrawCall.valid = false;
 
    result = anv_cmd_buffer_init_batch_bo_chain(cmd_buffer);
    if (result != VK_SUCCESS)

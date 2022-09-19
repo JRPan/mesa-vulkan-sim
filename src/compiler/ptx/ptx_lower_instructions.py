@@ -131,6 +131,8 @@ def translate_vector_operands(ptx_shader, unique_ID):
                 arg = line.args[argIndex]
                 if '.' not in arg:
                     continue
+                # if '.field0' in arg:
+                #     continue
                 assert arg[-2] == '.'
                 vectorRegName = arg[:-2]
                 newRegName = vectorRegName + '_' + str(vector_suffix_number(arg[-1]))
@@ -1380,6 +1382,12 @@ def translate_texture_instructions(ptx_shader):
             newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
             newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
             line.buildString(line.functionalType, [texture, sampler] + newDstNames + newCoordNames[0:2] + [lod, ])
+        if line.functionalType == FunctionalType.tex:
+            dst, texture, sampler, coord = line.args
+
+            newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
+            newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
+            line.buildString(FunctionalType.tex, newDstNames + [texture, sampler] + newCoordNames[0:2])
             
 
 

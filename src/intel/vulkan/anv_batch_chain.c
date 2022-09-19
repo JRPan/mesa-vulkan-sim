@@ -1879,15 +1879,7 @@ anv_queue_execbuf_locked(struct anv_queue *queue,
             submit->cmd_buffer->traceRayCall.launch_width, submit->cmd_buffer->traceRayCall.launch_height, submit->cmd_buffer->traceRayCall.launch_depth,
             submit->cmd_buffer->traceRayCall.launch_size_addr);
    else if (submit->cmd_buffer && submit->cmd_buffer->traceDrawCall.valid) {
-      struct anv_vertex_binding *vb = submit->cmd_buffer->state.vertex_bindings;
-      // std::bitset<32> vb_active(submit->cmd_buffer->state.gfx.vb_dirty);
-      // C does not have bitset
-      // for (int i = 0; i < MAX_VBS; i++) {
-      //    if (vb_active.test(i)) {
-      //       unsigned size = vb[i].buffer.size;
-      //    }
-      // }
-      gpgpusim_vkCmdDraw();
+      gpgpusim_vkCmdDraw(submit->cmd_buffer->state.vertex_bindings);
    }
    
    int ret = queue->device->no_hw ? 0 :

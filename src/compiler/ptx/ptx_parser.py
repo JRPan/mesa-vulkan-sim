@@ -138,6 +138,13 @@ class PTXDecleration (PTXLine):
             raise NotImplementedError
         
         args = command.split()
+        for i in range(0,len(args)):
+            if '.field0' in args[i]:
+                args[i] = args[i].replace('.','')
+            if '@' in args[i]:
+                    args[i] = args[i].replace('@','')
+            if '-' in args[i]:
+                    args[i] = args[i].replace('-','_')
         if '.v' in args[1]:
             self.vector = args[1]
             index = 2
@@ -229,6 +236,7 @@ class FunctionalType(Enum, metaclass=MetaEnum):
     selp = 'selp'
     pack_64_2x32_split = 'pack_64_2x32_split'
     txl = 'txl'
+    tex = 'tex'
     b2f32 = 'b2f32'
     fsign = 'fsign'
     shader_clock = 'shader_clock'
@@ -284,6 +292,13 @@ class PTXFunctionalLine (PTXLine): # come up with a better name. I mean a line t
             elif args[-1][-1] == ';':
                 args[-1] = args[-1][:-1]
             args = args.split(',')
+            for i in range(0,len(args)):
+                if '.field0' in args[i]:
+                    args[i] = args[i].replace('.','')
+                if '@' in args[i]:
+                    args[i] = args[i].replace('@','')
+                if '-' in args[i]:
+                    args[i] = args[i].replace('-','_')
             self.args = [arg.strip() for arg in args]
         else:
             self.args = []
@@ -304,6 +319,8 @@ class PTXFunctionalLine (PTXLine): # come up with a better name. I mean a line t
         
         self.args = args
         self.command += ' ' + ', '.join(args)
+        if self.functionalType == FunctionalType.tex:
+            self.command = self.command.replace('tex','tex.2d.v4.f32.f32')
         super().buildString()
     
 
@@ -331,6 +348,8 @@ class ShaderType(Enum):
     Intersection = auto()
     Any_hit = auto()
     Callable = auto()
+    Vertex = auto()
+    Fragment= auto()
 
 
 class PTXShader:
@@ -378,6 +397,11 @@ class PTXShader:
                 return ShaderType.Any_hit
             if 'CALLABLE' in line.fullLine:
                 return ShaderType.Callable
+            if 'VERTEX' in line.fullLine:
+                return ShaderType.Vertex
+            if 'FRAGMENT' in line.fullLine:
+                return ShaderType.Fragment
+
             
             assert 0
     

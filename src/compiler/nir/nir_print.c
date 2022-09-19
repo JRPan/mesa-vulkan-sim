@@ -3407,7 +3407,7 @@ print_tex_instr_as_ptx(nir_tex_instr *instr, print_state *state, ssa_reg_info *s
 
    ssa_register_info[instr->dest.ssa.index].type = FLOAT;
 
-   assert(instr->op == nir_texop_txl);
+   // assert(instr->op == nir_texop_txl);
 
    switch (instr->op) {
    case nir_texop_tex:
@@ -4499,7 +4499,7 @@ print_var_decl_as_ptx(nir_variable *var, print_state *state)
    if(size < 4)
       size = 4;
 
-   fprintf(fp, "decl_var %s, %d, %d, %d, %d, %u, %u;\t", var->name, size, glsl_get_vector_elements(var->type), 
+   fprintf(fp, "decl_var %s, %d, %d, %d, %d, %u, %u;\t", get_var_name(var, state), size, glsl_get_vector_elements(var->type), 
                   glsl_get_base_type(var->type), var->data.mode, var->data.driver_location, var->data.binding);
 
    // if ((var->data.mode == nir_var_shader_temp) ||
@@ -4651,6 +4651,7 @@ static void
 print_ptx_function_impl(nir_function_impl *impl, print_state *state, gl_shader_stage stage)
 {
    FILE *fp = state->fp;
+   uint32_t id = 0;
 
    //fprintf(fp, "\n// impl %s \n", impl->function->name);
 
@@ -4659,27 +4660,42 @@ print_ptx_function_impl(nir_function_impl *impl, print_state *state, gl_shader_s
    switch (stage) {
       case MESA_SHADER_RAYGEN:
          fprintf(fp, "MESA_SHADER_RAYGEN");
+         id = functionID;
          break;
       case MESA_SHADER_ANY_HIT:
          fprintf(fp, "MESA_SHADER_ANY_HIT");
+         id = functionID;
          break;
       case MESA_SHADER_CLOSEST_HIT:
          fprintf(fp, "MESA_SHADER_CLOSEST_HIT");
+         id = functionID;
          break;
       case MESA_SHADER_MISS:
          fprintf(fp, "MESA_SHADER_MISS");
+         id = functionID;
          break;
       case MESA_SHADER_INTERSECTION:
          fprintf(fp, "MESA_SHADER_INTERSECTION");
+         id = functionID;
          break;
       case MESA_SHADER_CALLABLE:
          fprintf(fp, "MESA_SHADER_CALLABLE");
+         id = functionID;
+         break;
+      case MESA_SHADER_VERTEX:
+         fprintf(fp, "MESA_SHADER_VERTEX");
+         id = functionID - 1;
+         break;
+      case MESA_SHADER_FRAGMENT:
+         fprintf(fp, "MESA_SHADER_FRAGMENT");
+         id = functionID + 1;
          break;
       default:
          unreachable("Invalid shader type");
    }
 
-   fprintf(fp, "_func%d", functionID++);
+   functionID++;
+   fprintf(fp, "_func%d", id++);
 
    fprintf(fp, "_%s ", impl->function->name);
    fprintf(fp, "() "); // any shader inputs would go here
