@@ -1879,7 +1879,8 @@ anv_queue_execbuf_locked(struct anv_queue *queue,
             submit->cmd_buffer->traceRayCall.launch_width, submit->cmd_buffer->traceRayCall.launch_height, submit->cmd_buffer->traceRayCall.launch_depth,
             submit->cmd_buffer->traceRayCall.launch_size_addr);
    else if (submit->cmd_buffer && submit->cmd_buffer->traceDrawCall.valid) {
-      gpgpusim_vkCmdDraw(submit->cmd_buffer->state.vertex_bindings);
+      gpgpusim_vkCmdDraw(submit->cmd_buffer->state.vertex_bindings, 
+      submit->cmd_buffer->state.gfx.pipeline);
    }
    
    int ret = queue->device->no_hw ? 0 :

@@ -2996,6 +2996,7 @@ struct anv_TraceRayCall {
 struct anv_DrawCall {
    bool valid;
    void * vb;
+   uint32_t vertexcount;
 };
 
 struct anv_cmd_buffer {
