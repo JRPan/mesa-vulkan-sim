@@ -693,10 +693,10 @@ def translate_decl_var(ptx_shader):
         newReg.leadingWhiteSpace = '\t'
         newReg.buildString(DeclarationType.Register, None, '.b64', name)
 
-        if int(vector_number) != 0:
-            allocation_size = int(size) * int(vector_number)
-        else:
-            allocation_size = int(size)
+        # if int(vector_number) != 0:
+        #     allocation_size = int(size) * int(vector_number)
+        # else:
+        allocation_size = int(size)
 
 
         if int(storage_qualifier_type) == 16: ## uniform type
