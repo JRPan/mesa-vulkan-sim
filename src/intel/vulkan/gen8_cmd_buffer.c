@@ -33,6 +33,7 @@
 #include "genxml/genX_pack.h"
 #include "common/gen_guardband.h"
 
+#include "gpgpusim_calls_from_mesa.h"
 #if GEN_GEN == 8
 void
 gen8_cmd_buffer_emit_viewport(struct anv_cmd_buffer *cmd_buffer)
@@ -688,6 +689,7 @@ void genX(CmdBindIndexBuffer)(
    ANV_FROM_HANDLE(anv_cmd_buffer, cmd_buffer, commandBuffer);
    ANV_FROM_HANDLE(anv_buffer, buffer, _buffer);
 
+   gpgpusim_saveIndexBuffer(buffer);
    cmd_buffer->state.restart_index = restart_index_for_type(indexType);
 
    anv_batch_emit(&cmd_buffer->batch, GENX(3DSTATE_INDEX_BUFFER), ib) {
