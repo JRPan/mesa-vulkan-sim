@@ -166,6 +166,8 @@ static void anv_spirv_nir_debug(void *private_data,
                    0, 0, "anv", buffer);
 }
 
+static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath);
+
 /* Eventually, this will become part of anv_CreateShader.  Unfortunately,
  * we can't do that yet because we don't have the ability to copy nir.
  */
@@ -1348,7 +1350,6 @@ anv_pipeline_init_from_cached_graphics(struct anv_graphics_pipeline *pipeline)
    }
    pipeline->use_primitive_replication = pos_slots > 1;
 }
-static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath);
 
 static void run_rt_translation_passes()
 {
@@ -1594,12 +1595,12 @@ anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
    // VERTEX 
    assert(stages[0].stage == MESA_SHADER_VERTEX);
    stages[0].bin = (void *)gpgpusim_registerShader(shaderPaths[0], (uint32_t)(stages[0].stage));
-   assert((uint64_t)(stages[0].bin) == 0);
+   assert((uint64_t)(stages[0].bin) % 2 == 0);
 
    // FRAG
    assert(stages[4].stage == MESA_SHADER_FRAGMENT);
    stages[4].bin = (void *)gpgpusim_registerShader(shaderPaths[4], (uint32_t)(stages[4].stage));
-   assert((uint64_t)(stages[4].bin) == 1);
+   assert((uint64_t)(stages[4].bin) % 2 == 1);
    // for (uint32_t i = 0; i < info->stageCount; i++)
    //    if((stages[i].stage == MESA_SHADER_VERTEX ||
    //        stages[i].stage == MESA_SHADER_FRAGMENT) && stages[i].module) {

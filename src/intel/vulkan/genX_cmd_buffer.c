@@ -3847,8 +3847,8 @@ void genX(CmdDrawIndexed)(
 
    update_dirty_vbs_for_gen8_vb_flush(cmd_buffer, RANDOM);
 
-   cmd_buffer->traceDrawCall.vertexcount = indexCount;
-   cmd_buffer->traceDrawCall.valid = true;
+   gpgpusim_vkCmdDraw(cmd_buffer->state.vertex_bindings, 
+      cmd_buffer->state.gfx.pipeline);
 }
 
 /* Auto-Draw / Indirect Registers */

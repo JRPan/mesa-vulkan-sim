@@ -989,7 +989,6 @@ void anv_CmdBindVertexBuffers2EXT(
       vb[firstBinding + i].size = pSizes ? pSizes[i] : 0;
       vb[firstBinding + i].stride = pStrides ? pStrides[i] : 0;
       cmd_buffer->state.gfx.vb_dirty |= 1 << (firstBinding + i);
-      gpgpusim_saveVertexBuffer(&vb[firstBinding + i]);
    }
 }
 
