@@ -320,11 +320,19 @@ glsl_type_is_matrix(const struct glsl_type *type)
 {
    return type->is_matrix();
 }
+bool
+glsl_type_is_mat4(const struct glsl_type *type)
+{
+   return type->is_mat4();
+}
 
 bool
 glsl_matrix_type_is_row_major(const struct glsl_type *type)
 {
-   assert(type->is_matrix() && type->explicit_stride);
+   if (!(type->is_matrix() && type->explicit_stride))
+   {
+      return false;
+   }
    return type->interface_row_major;
 }
 

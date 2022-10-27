@@ -247,6 +247,10 @@ nir_deref_instr_array_stride(nir_deref_instr *deref)
    case nir_deref_type_array_wildcard: {
       const struct glsl_type *arr_type = nir_deref_instr_parent(deref)->type;
       unsigned stride = glsl_get_explicit_stride(arr_type);
+      // TODO: mat4 must be 4x4 floats, right?
+      if (glsl_type_is_mat4(arr_type)) {
+         stride = 16;
+      }
 
       if ((glsl_type_is_matrix(arr_type) &&
            glsl_matrix_type_is_row_major(arr_type)) ||

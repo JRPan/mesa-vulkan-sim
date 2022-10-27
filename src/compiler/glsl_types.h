@@ -741,6 +741,11 @@ public:
                                       base_type == GLSL_TYPE_DOUBLE ||
                                       base_type == GLSL_TYPE_FLOAT16);
    }
+   bool is_mat4() const
+   {
+      /* GLSL only has float matrices. */
+      return (!strcmp(name,"mat4"));
+   }
 
    /**
     * Query whether or not a type is a non-array numeric type
