@@ -237,6 +237,7 @@ class FunctionalType(Enum, metaclass=MetaEnum):
     pack_64_2x32_split = 'pack_64_2x32_split'
     txl = 'txl'
     tex = 'tex'
+    txs = 'txs'
     b2f32 = 'b2f32'
     fsign = 'fsign'
     shader_clock = 'shader_clock'

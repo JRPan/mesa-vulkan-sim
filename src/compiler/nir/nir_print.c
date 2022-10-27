@@ -2102,6 +2102,133 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
       }
       fprintf(fp, "%s ", info->name); // Intrinsic function name
    }
+   else if (!strcmp(info->name, "load_first_vertex")){
+      if (info->has_dest) {
+         ssa_register_info[instr->dest.ssa.index].type = UINT;
+         print_ptx_reg_decl(state, instr->dest.ssa.num_components, UINT, instr->dest.ssa.bit_size);
+         print_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";\n");
+         print_tabs(tabs, fp);
+      }
+      fprintf(fp, "%s ", info->name); // Intrinsic function name
+   }
+   else if (!strcmp(info->name, "load_vertex_id_zero_base")){
+      if (info->has_dest) {
+         ssa_register_info[instr->dest.ssa.index].type = UINT;
+         print_ptx_reg_decl(state, instr->dest.ssa.num_components, UINT, instr->dest.ssa.bit_size);
+         print_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";\n");
+         print_tabs(tabs, fp);
+      }
+      fprintf(fp, "%s ", info->name); // Intrinsic function name
+   }
+   // else if (!strcmp(info->name, "read_first_invocation")){
+   //    int src_reg_idx = instr->src[0].ssa->index;
+   //    val_type ssa_reg_type = ssa_register_info[src_reg_idx].type;
+   //    if (info->has_dest) {
+   //       // ssa_register_info[instr->dest.ssa.index].type = UINT;
+   //       switch (ssa_reg_type)
+   //       {
+   //       case UINT:
+   //          print_ptx_reg_decl(state, instr->dest.ssa.num_components, UINT, instr->dest.ssa.bit_size);
+   //          break;
+   //       case INT:
+   //          print_ptx_reg_decl(state, instr->dest.ssa.num_components, INT, instr->dest.ssa.bit_size);
+   //          break;
+   //       case FLOAT:
+   //          print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
+   //          break;
+   //       case BITS:
+   //          print_ptx_reg_decl(state, instr->dest.ssa.num_components, BITS, instr->dest.ssa.bit_size);
+   //          break;
+   //       case PREDICATE:
+   //          print_ptx_reg_decl(state, instr->dest.ssa.num_components, PREDICATE, instr->dest.ssa.bit_size);
+   //          break;
+   //       case UNDEF:
+   //          printf("Should not be in here!\n");
+   //          assert(0);
+   //          break;
+   //       }
+   //       print_dest_as_ptx_no_pos(&instr->dest, state);
+   //       fprintf(fp, ";\n");
+   //       print_tabs(tabs, fp);
+   //    }
+   //    switch (ssa_reg_type) {
+   //          case UINT:
+   //             fprintf(fp, "mov.u%d ", instr->dest.ssa.bit_size);
+   //             ssa_register_info[instr->dest.ssa.index].type = UINT;
+   //             break;
+   //          case INT:
+   //             fprintf(fp, "mov.s%d ", instr->dest.ssa.bit_size);
+   //             ssa_register_info[instr->dest.ssa.index].type = UINT;
+   //             break;
+   //          case FLOAT:
+   //             fprintf(fp, "mov.f%d ", instr->dest.ssa.bit_size);
+   //             ssa_register_info[instr->dest.ssa.index].type = UINT;
+   //             break;
+   //          case BITS:
+   //             fprintf(fp, "mov.b%d ", instr->dest.ssa.bit_size);
+   //             ssa_register_info[instr->dest.ssa.index].type = UINT;
+   //             break;
+   //          case PREDICATE:
+   //             fprintf(fp, "mov.pred ");
+   //             ssa_register_info[instr->dest.ssa.index].type = UINT;
+   //             break;
+   //          case UNDEF:
+   //             printf("Should not be in here!\n");
+   //             assert(0);
+   //             break;
+   //       }
+   // }
+   // else if (!strcmp(info->name, "reduce")){
+   //    if (info->has_dest) {
+   //       ssa_register_info[instr->dest.ssa.index].type = FLOAT;
+   //       print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
+   //       print_dest_as_ptx_no_pos(&instr->dest, state);
+   //       fprintf(fp, ";\n");
+   //       print_tabs(tabs, fp);
+   //    }
+   //    fprintf(fp, "%s ", info->name); // Intrinsic function name
+   //    // fprintf(fp, "%s%d, ", val_type_to_str(ssa_register_info[instr->src[1].ssa->index].type), ssa_register_info[instr->src[1].ssa->index].num_bits);
+   // }
+   // else if (!strcmp(info->name, "load_frag_coord")){
+   //    // The argument 2 probably means memory_scope=SUBGROUP
+   //    // Store lower 32 bits in dst.x and upper 32 bits in dst.y
+   //    if (info->has_dest) {
+   //       ssa_register_info[instr->dest.ssa.index].type = UINT;
+   //       print_ptx_reg_decl(state, instr->dest.ssa.num_components, UINT, instr->dest.ssa.bit_size);
+   //       print_dest_as_ptx_no_pos(&instr->dest, state);
+   //       fprintf(fp, ";\n");
+   //       print_tabs(tabs, fp);
+   //    }
+   //    fprintf(fp, "decl_var o_color, 16, 4, 2, 2, 0, 0;\n");
+   //    print_tabs(tabs, fp);
+   //    fprintf(fp,".reg .u32 %%frag_coord\n");
+   //    print_tabs(tabs, fp);
+   //    fprintf(fp, "deref_var %%frag_coord, o_color, f32, shader_out\n");
+   //    print_tabs(tabs, fp);
+   //    fprintf(fp, "load_deref 4, "); // Intrinsic function name
+   // }
+   // else if (!strcmp(info->name, "load_base_instance")){
+   //    if (info->has_dest) {
+   //       ssa_register_info[instr->dest.ssa.index].type = INT;
+   //       print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
+   //       print_dest_as_ptx_no_pos(&instr->dest, state);
+   //       fprintf(fp, ";\n");
+   //       print_tabs(tabs, fp);
+   //    }
+   //    fprintf(fp, "%s ", info->name); // Intrinsic function name
+   // }
+   // else if (!strcmp(info->name, "load_instance_id")){
+   //    if (info->has_dest) {
+   //       ssa_register_info[instr->dest.ssa.index].type = INT;
+   //       print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
+   //       print_dest_as_ptx_no_pos(&instr->dest, state);
+   //       fprintf(fp, ";\n");
+   //       print_tabs(tabs, fp);
+   //    }
+   //    fprintf(fp, "%s ", info->name); // Intrinsic function name
+   // }
    else {
       fprintf(fp, "// untranslated %s instruction. ", info->name);
    }
@@ -2112,10 +2239,22 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
       if(num_srcs > 0)
          fprintf(fp, ", ");
    }
+   // if (!strcmp(info->name, "load_frag_coord")){
+   //    fprintf(fp, ", %%frag_coord, 0 ");
+   // }
 
    for (unsigned i = 0; i < num_srcs; i++) {
       if (i != 0)
          fprintf(fp, ", ");
+      // if (!strcmp(info->name, "read_first_invocation") && i == 1) {
+      //    break;
+      // }
+      // if (!strcmp(info->name, "reduce") && i == 1) {
+      //    break;
+      // }
+      // if (!strcmp(info->name, "load_frag_coord") && i == 1) {
+      //    break;
+      // }
 
       print_src_as_ptx(&instr->src[i], state);
    }
@@ -2123,6 +2262,15 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
    //fprintf(fp, ", ");
 
    for (unsigned i = 0; i < info->num_indices; i++) {
+      if (!strcmp(info->name, "read_first_invocation")) {
+         break;
+      }
+      if (!strcmp(info->name, "reduce") && i == 1) {
+         break;
+      }
+      if (!strcmp(info->name, "load_frag_coord") && i == 1) {
+         break;
+      }
       //if (i != 0)
       fprintf(fp, ", ");
 
@@ -2998,6 +3146,180 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = UINT;
       }
+      else if (!strcmp(nir_op_infos[instr->op].name, "ffloor")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT
+         , instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "cvt.rzi.f32.f32 ");
+      }
+      else if (!strcmp(nir_op_infos[instr->op].name, "ffract")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "cvt.rzi.f32.f32 ");
+         // Prints the rest of the instruction
+         for (unsigned i = 0; i < instr->dest.dest.ssa.num_components; i++) {
+            // Src and Dst Operands
+            print_alu_dest_as_ptx(&instr->dest, state, i);
+            fprintf(fp, ", ");
+            for (unsigned j = 0; j < nir_op_infos[instr->op].num_inputs; j++) {
+               if (j != 0)
+                  fprintf(fp, ", ");
+
+               print_alu_src_as_ptx(instr, j, state);
+            }
+         }
+
+         fprintf(fp, ";\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "sub.f32 ");
+      }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "fexp2")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "ex2.approx.f32 ");
+      // }
+      else if (!strcmp(nir_op_infos[instr->op].name, "fsin")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "sin.approx.f32 ");
+      }
+      else if (!strcmp(nir_op_infos[instr->op].name, "fcos")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "cos.approx.f32 ");
+      }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "ufind_msb")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, INT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "bfind.u32 ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "pack_half_2x16_split")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "pack_half_2x16_split ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "extract_u16")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "extract_u16 ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "imax")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, INT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "max.s32 ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "imin")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, INT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "min.s32 ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "bfi")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "bfi_mesa ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "fround_even")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "cvt.rn ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "extract_u8")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "extract_u8 ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "fddy")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "fddy ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "fddx")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "fddx ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "bfm")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "bfm ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "unpack_half_2x16_split_x")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "cvt.rz.f32.f16 ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
+      // else if (!strcmp(nir_op_infos[instr->op].name, "unpack_half_2x16_split_y")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
+      //    fprintf(fp, "shr.u32 ");
+      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      // }
       else {
          fprintf(fp, "// Untranslated NIR instruction ");
       }
@@ -3014,6 +3336,13 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
             print_alu_src_as_ptx(instr, j, state);
          }
       }
+      if (!strcmp(nir_op_infos[instr->op].name, "ffract")) {
+         fprintf(fp, ", ");
+         print_alu_dest_as_ptx(&instr->dest, state, 0);
+      }
+      // if (!strcmp(nir_op_infos[instr->op].name, "unpack_half_2x16_split_y")) {
+      //    fprintf(fp, ", 16 ");
+      // }
 
       fprintf(fp, ";");
    }
@@ -3402,6 +3731,11 @@ print_tex_instr_as_ptx(nir_tex_instr *instr, print_state *state, ssa_reg_info *s
 
    // PTX Code
    print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
+   // if (instr->op == nir_texop_tex) {
+   //    print_ptx_reg_decl(state, 4, FLOAT, instr->dest.ssa.bit_size);
+   // } else {
+   //    print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
+   // }
    print_dest_as_ptx_no_pos(&instr->dest, state);
    fprintf(fp, ";\n\t");
 

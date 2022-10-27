@@ -122,8 +122,49 @@ def translate_vector_operands(ptx_shader, unique_ID):
     while index + 1 < len(ptx_shader.lines):
         index += 1
         line = ptx_shader.lines[index]
+        if 'undefined' in line.comment and \
+            ('vec2' in line.comment or \
+            'vec3' in line.comment or \
+            'vec4' in line.comment):
+            newLines = list()
 
-        if line.instructionClass == InstructionClass.Functional:
+            newLine = PTXFunctionalLine()
+            newLine.leadingWhiteSpace = line.leadingWhiteSpace
+            argIndex = 0
+            arg = line.args[argIndex]
+            vectorRegName = line.args[0]
+            newRegName = vectorRegName + '_' + str(0)
+            args = line.args
+            args = list(args)
+            args[argIndex] = newRegName
+            newLine.buildString(line.fullFunction, args)
+            newLines.append(newLine)
+
+            newLine = PTXFunctionalLine()
+            newLine.leadingWhiteSpace = line.leadingWhiteSpace
+            newRegName = vectorRegName + '_' + str(1)
+            args[argIndex] = newRegName
+            newLine.buildString(line.fullFunction, args)
+            newLines.append(newLine)
+
+            newLine = PTXFunctionalLine()
+            newLine.leadingWhiteSpace = line.leadingWhiteSpace
+            newRegName = vectorRegName + '_' + str(2)
+            args[argIndex] = newRegName
+            newLine.buildString(line.fullFunction, args)
+            newLines.append(newLine)
+            
+            newLine = PTXFunctionalLine()
+            newLine.leadingWhiteSpace = line.leadingWhiteSpace
+            newRegName = vectorRegName + '_' + str(3)
+            args[argIndex] = newRegName
+            newLine.buildString(line.fullFunction, args)
+            newLines.append(newLine)
+
+            ptx_shader.lines.remove(line)
+            ptx_shader.lines[index:index] = newLines
+
+        elif line.instructionClass == InstructionClass.Functional:
             # print("#######################")
             print(line.fullLine)
 
@@ -1382,12 +1423,17 @@ def translate_texture_instructions(ptx_shader):
             newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
             newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
             line.buildString(line.functionalType, [texture, sampler] + newDstNames + newCoordNames[0:2] + [lod, ])
-        if line.functionalType == FunctionalType.tex:
+        elif line.functionalType == FunctionalType.tex:
             dst, texture, sampler, coord = line.args
 
             newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
             newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
             line.buildString(FunctionalType.tex, newDstNames + [texture, sampler] + newCoordNames[0:2])
+        elif line.functionalType == FunctionalType.txs:
+            dst, texture, lod = line.args
+
+            newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
+            line.buildString(FunctionalType.txs, newDstNames + [texture, ] + [lod, ])
             
 
 
@@ -1461,6 +1507,8 @@ def main():
 
     shaders = []
     for shaderFile in os.listdir(shaderFolder):
+        if 'translated' in shaderFile:
+            continue
         shaders.append(PTXShader(os.path.join(shaderFolder, shaderFile)))
     
     shaderIDs = {}
