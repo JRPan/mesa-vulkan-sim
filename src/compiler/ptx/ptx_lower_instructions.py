@@ -1428,7 +1428,10 @@ def translate_texture_instructions(ptx_shader):
 
             newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
             newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
-            line.buildString(FunctionalType.tex, newDstNames + [texture, sampler] + newCoordNames[0:2])
+            if len(newCoordNames) < 3:
+                newCoordNames.append(str(0))
+                assert(len(newCoordNames) == 3)
+            line.buildString(FunctionalType.tex, newDstNames + [texture, sampler] + newCoordNames[0:3])
         elif line.functionalType == FunctionalType.txs:
             dst, texture, lod = line.args
 
