@@ -689,7 +689,7 @@ void genX(CmdBindIndexBuffer)(
    ANV_FROM_HANDLE(anv_cmd_buffer, cmd_buffer, commandBuffer);
    ANV_FROM_HANDLE(anv_buffer, buffer, _buffer);
 
-   gpgpusim_saveIndexBuffer(buffer);
+   gpgpusim_saveIndexBuffer(buffer, indexType);
    cmd_buffer->state.restart_index = restart_index_for_type(indexType);
 
    anv_batch_emit(&cmd_buffer->batch, GENX(3DSTATE_INDEX_BUFFER), ib) {
