@@ -980,6 +980,8 @@ def translate_phi(ptx_shader):
                 variableType = src0Decleration.variableType
             elif src0Decleration.variableType[0:2] == '.u' and src1Decleration.variableType[0:2] == '.s':
                 variableType = src1Decleration.variableType #lets go with .s for now
+            elif src0Decleration.variableType[0:2] == '.b' and src1Decleration.variableType[0:2] == '.s':
+                variableType = src1Decleration.variableType
             else:
                 assert 0
 

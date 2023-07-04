@@ -3221,15 +3221,24 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
       //    fprintf(fp, "pack_half_2x16_split ");
       //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
       // }
-      // else if (!strcmp(nir_op_infos[instr->op].name, "extract_u16")) {
-      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
-      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-      //    fprintf(fp, ";");
-      //    fprintf(fp, "\n");
-      //    print_tabs(tabs, fp);
-      //    fprintf(fp, "extract_u16 ");
-      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
-      // }
+      else if (!strcmp(nir_op_infos[instr->op].name, "extract_u16")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "add.f32 ");
+         // fprintf(fp, "extract_u16 ");
+         // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      }
+      else if (!strcmp(nir_op_infos[instr->op].name, "fceil")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "cvt.rpi.f32.f32 ");
+      }
       // else if (!strcmp(nir_op_infos[instr->op].name, "imax")) {
       //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, INT, instr->dest.dest.ssa.bit_size);
       //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
