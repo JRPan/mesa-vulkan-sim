@@ -118,10 +118,12 @@ static nir_ssa_def *
 load_input(struct st_translate *t, gl_varying_slot slot)
 {
    if (!t->inputs[slot]) {
+      const char *slot_name =
+         gl_varying_slot_name_for_stage(slot, MESA_SHADER_FRAGMENT);
       nir_variable *var = nir_variable_create(t->b->shader, nir_var_shader_in,
                                               slot == VARYING_SLOT_FOGC ?
                                               glsl_float_type() : glsl_vec4_type(),
-                                              gl_varying_slot_name(slot));
+                                              slot_name);
       var->data.location = slot;
       var->data.interpolation = INTERP_MODE_NONE;
 
@@ -361,7 +363,7 @@ compile_setupinst(struct st_translate *t,
       nir_tex_instr *tex = nir_tex_instr_create(t->b->shader, 3);
       tex->op = nir_texop_tex;
       tex->sampler_dim = glsl_get_sampler_dim(tex_var->type);
-      tex->dest_type = nir_type_float;
+      tex->dest_type = nir_type_float32;
       tex->coord_components =
          glsl_get_sampler_dim_coordinate_components(tex->sampler_dim);
 
@@ -405,10 +407,10 @@ compile_instruction(struct st_translate *t,
       result = emit_dstmod(t, result, inst->DstReg[optype].dstMod);
 
       /* Do the writemask */
-      nir_const_value wrmask[4] = { 0 };
+      nir_const_value wrmask[4];
       for (int i = 0; i < 4; i++) {
-         if (inst->DstReg[optype].dstMask & (1 << i))
-            wrmask[i].b = 1;
+         bool bit = inst->DstReg[optype].dstMask & (1 << i);
+         wrmask[i] = nir_const_value_for_bool(bit, 1);
       }
 
       t->temps[dstreg] = nir_bcsel(t->b,
@@ -457,6 +459,7 @@ st_translate_atifs_program(struct ati_fragment_shader *atifs,
 
    nir_shader *s = t->b->shader;
    s->info.name = ralloc_asprintf(s, "ATIFS%d", program->Id);
+   s->info.internal = false;
 
    t->fragcolor = nir_variable_create(b.shader, nir_var_shader_out,
                                       glsl_vec4_type(), "gl_FragColor");
@@ -534,8 +537,7 @@ void
 st_init_atifs_prog(struct gl_context *ctx, struct gl_program *prog)
 {
    /* we know this is st_fragment_program, because of st_new_ati_fs() */
-   struct st_program *stfp = (struct st_program *) prog;
-   struct ati_fragment_shader *atifs = stfp->ati_fs;
+   struct ati_fragment_shader *atifs = prog->ati_fs;
 
    unsigned pass, i, r, optype, arg;
 

@@ -31,6 +31,7 @@
 #include "c11/threads.h"
 
 #include "util/macros.h"
+#include "util/simple_mtx.h"
 #include "u_current.h"
 #include "entry.h"
 #include "stub.h"
@@ -65,7 +66,7 @@ stub_compare(const void *key, const void *elem)
    const struct mapi_stub *stub = (const struct mapi_stub *) elem;
    const char *stub_name;
 
-   stub_name = &public_string_pool[(unsigned long) stub->name];
+   stub_name = &public_string_pool[(size_t) stub->name];
 
    return strcmp(name, stub_name);
 }
@@ -118,11 +119,11 @@ stub_add_dynamic(const char *name)
 struct mapi_stub *
 stub_find_dynamic(const char *name, int generate)
 {
-   static mtx_t dynamic_mutex = _MTX_INITIALIZER_NP;
+   static simple_mtx_t dynamic_mutex = SIMPLE_MTX_INITIALIZER;
    struct mapi_stub *stub = NULL;
    int count, i;
-   
-   mtx_lock(&dynamic_mutex);
+
+   simple_mtx_lock(&dynamic_mutex);
 
    if (generate)
       assert(!stub_find_public(name));
@@ -139,7 +140,7 @@ stub_find_dynamic(const char *name, int generate)
    if (generate && !stub)
          stub = stub_add_dynamic(name);
 
-   mtx_unlock(&dynamic_mutex);
+   simple_mtx_unlock(&dynamic_mutex);
 
    return stub;
 }
@@ -193,7 +194,7 @@ stub_get_name(const struct mapi_stub *stub)
 
    if (stub >= public_stubs &&
        stub < public_stubs + ARRAY_SIZE(public_stubs))
-      name = &public_string_pool[(unsigned long) stub->name];
+      name = &public_string_pool[(size_t) stub->name];
    else
       name = (const char *) stub->name;
 

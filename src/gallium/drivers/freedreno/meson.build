@@ -19,6 +19,8 @@
 # SOFTWARE.
 
 files_libfreedreno = files(
+  'freedreno_autotune.c',
+  'freedreno_autotune.h',
   'freedreno_batch.c',
   'freedreno_batch.h',
   'freedreno_batch_cache.c',
@@ -116,6 +118,8 @@ files_libfreedreno = files(
   'a3xx/fd3_zsa.h',
   'a4xx/fd4_blend.c',
   'a4xx/fd4_blend.h',
+  'a4xx/fd4_compute.c',
+  'a4xx/fd4_compute.h',
   'a4xx/fd4_context.c',
   'a4xx/fd4_context.h',
   'a4xx/fd4_draw.c',
@@ -126,6 +130,8 @@ files_libfreedreno = files(
   'a4xx/fd4_format.h',
   'a4xx/fd4_gmem.c',
   'a4xx/fd4_gmem.h',
+  'a4xx/fd4_image.c',
+  'a4xx/fd4_image.h',
   'a4xx/fd4_program.c',
   'a4xx/fd4_program.h',
   'a4xx/fd4_query.c',
@@ -186,8 +192,6 @@ files_libfreedreno = files(
   'a6xx/fd6_draw.h',
   'a6xx/fd6_emit.c',
   'a6xx/fd6_emit.h',
-  'a6xx/fd6_format.c',
-  'a6xx/fd6_format.h',
   'a6xx/fd6_gmem.c',
   'a6xx/fd6_gmem.h',
   'a6xx/fd6_image.c',
@@ -215,18 +219,20 @@ files_libfreedreno = files(
   'ir3/ir3_gallium.h',
 )
 
-files_libfreedreno += custom_target(
+freedreno_tracepoints = custom_target(
   'freedreno_tracepoints.[ch]',
   input: 'freedreno_tracepoints.py',
   output: ['freedreno_tracepoints.c', 'freedreno_tracepoints.h'],
   command: [
     prog_python, '@INPUT@',
-    '-p', join_paths(meson.source_root(), 'src/gallium/auxiliary/util/'),
+    '-p', join_paths(dir_source_root, 'src/util/perf/'),
     '-C', '@OUTPUT0@',
     '-H', '@OUTPUT1@',
   ],
   depend_files: u_trace_py,
 )
+
+files_libfreedreno += freedreno_tracepoints
 
 freedreno_includes = [
   inc_mesa, inc_mapi,
@@ -244,6 +250,23 @@ if cpp.has_argument('-Wpacked-bitfield-compat')
   freedreno_cpp_args += '-Wno-packed-bitfield-compat'
 endif
 
+libfreedreno_dependencies = [
+  dep_libdrm,
+  idep_mesautil,
+  idep_nir_headers,
+  idep_libfreedreno_common,
+  idep_u_tracepoints,
+]
+
+if with_perfetto
+  libfreedreno_dependencies += dep_perfetto
+  files_libfreedreno += 'freedreno_perfetto.cc'
+endif
+
+# The header file ends up part of the build (but just a stub)
+# in either case:
+files_libfreedreno += 'freedreno_perfetto.h'
+
 libfreedreno = static_library(
   'freedreno',
   [files_libfreedreno, freedreno_xml_header_files],
@@ -251,13 +274,8 @@ libfreedreno = static_library(
   c_args : [freedreno_c_args],
   cpp_args : [freedreno_cpp_args],
   gnu_symbol_visibility : 'hidden',
-  dependencies : [
-    dep_libdrm,
-    idep_mesautil,
-    idep_nir_headers,
-    idep_libfreedreno_common,
-    idep_u_tracepoints,
-  ],
+  dependencies : libfreedreno_dependencies,
+  override_options : ['cpp_std=c++17'],
 )
 
 driver_freedreno = declare_dependency(
@@ -271,12 +289,15 @@ driver_freedreno = declare_dependency(
     libfreedreno_layout,
     libfreedreno_perfcntrs
   ],
-  dependencies : idep_nir,
+  dependencies : [
+    idep_nir,
+    idep_xmlconfig,
+  ],
 )
 
 ir3_compiler = executable(
   'ir3_compiler',
-  'ir3/ir3_cmdline.c',
+  ['ir3/ir3_cmdline.c', freedreno_xml_header_files],
   include_directories : freedreno_includes,
   dependencies : [
     idep_nir,
@@ -296,12 +317,16 @@ ir3_compiler = executable(
 
 gmemtool = executable(
   'gmemtool',
-  'gmemtool.c',
+  [
+    'gmemtool.c',
+    freedreno_tracepoints[1]
+  ],
   include_directories : freedreno_includes,
   dependencies : [
     idep_nir,
     idep_mesautil,
     idep_u_tracepoints,
+    idep_xmlconfig,
   ],
   link_with : [
     libfreedreno,

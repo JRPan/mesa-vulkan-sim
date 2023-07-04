@@ -40,61 +40,6 @@
 
 #include "git_sha1.h"
 
-enum clc_debug_flags {
-   CLC_DEBUG_DUMP_SPIRV = 1 << 0,
-   CLC_DEBUG_VERBOSE = 1 << 1,
-};
-
-static const struct debug_named_value clc_debug_options[] = {
-   { "dump_spirv",  CLC_DEBUG_DUMP_SPIRV, "Dump spirv blobs" },
-   { "verbose",  CLC_DEBUG_VERBOSE, NULL },
-   DEBUG_NAMED_VALUE_END
-};
-
-DEBUG_GET_ONCE_FLAGS_OPTION(debug_clc, "CLC_DEBUG", clc_debug_options, 0)
-
-static void
-clc_print_kernels_info(const struct clc_object *obj)
-{
-   fprintf(stdout, "Kernels:\n");
-   for (unsigned i = 0; i < obj->num_kernels; i++) {
-      const struct clc_kernel_arg *args = obj->kernels[i].args;
-      bool first = true;
-
-      fprintf(stdout, "\tvoid %s(", obj->kernels[i].name);
-      for (unsigned j = 0; j < obj->kernels[i].num_args; j++) {
-         if (!first)
-            fprintf(stdout, ", ");
-         else
-            first = false;
-
-         switch (args[j].address_qualifier) {
-         case CLC_KERNEL_ARG_ADDRESS_GLOBAL:
-            fprintf(stdout, "__global ");
-            break;
-         case CLC_KERNEL_ARG_ADDRESS_LOCAL:
-            fprintf(stdout, "__local ");
-            break;
-         case CLC_KERNEL_ARG_ADDRESS_CONSTANT:
-            fprintf(stdout, "__constant ");
-            break;
-         default:
-            break;
-         }
-
-         if (args[j].type_qualifier & CLC_KERNEL_ARG_TYPE_VOLATILE)
-            fprintf(stdout, "volatile ");
-         if (args[j].type_qualifier & CLC_KERNEL_ARG_TYPE_CONST)
-            fprintf(stdout, "const ");
-         if (args[j].type_qualifier & CLC_KERNEL_ARG_TYPE_RESTRICT)
-            fprintf(stdout, "restrict ");
-
-         fprintf(stdout, "%s %s", args[j].type_name, args[j].name);
-      }
-      fprintf(stdout, ");\n");
-   }
-}
-
 struct clc_image_lower_context
 {
    struct clc_dxil_metadata *metadata;
@@ -108,19 +53,20 @@ struct clc_image_lower_context
 static int
 lower_image_deref_impl(nir_builder *b, struct clc_image_lower_context *context,
                        const struct glsl_type *new_var_type,
+                       nir_variable_mode var_mode,
                        unsigned *num_bindings)
 {
    nir_variable *in_var = nir_deref_instr_get_variable(context->deref);
-   nir_variable *uniform = nir_variable_create(b->shader, nir_var_uniform, new_var_type, NULL);
-   uniform->data.access = in_var->data.access;
-   uniform->data.binding = in_var->data.binding;
+   nir_variable *image = nir_variable_create(b->shader, var_mode, new_var_type, NULL);
+   image->data.access = in_var->data.access;
+   image->data.binding = in_var->data.binding;
    if (context->num_buf_ids > 0) {
       // Need to assign a new binding
       context->metadata->args[context->metadata_index].
-         image.buf_ids[context->num_buf_ids] = uniform->data.binding = (*num_bindings)++;
+         image.buf_ids[context->num_buf_ids] = image->data.binding = (*num_bindings)++;
    }
    context->num_buf_ids++;
-   return uniform->data.binding;
+   return image->data.binding;
 }
 
 static int
@@ -132,10 +78,10 @@ lower_read_only_image_deref(nir_builder *b, struct clc_image_lower_context *cont
    // Non-writeable images should be converted to samplers,
    // since they may have texture operations done on them
    const struct glsl_type *new_var_type =
-      glsl_sampler_type(glsl_get_sampler_dim(in_var->type),
-            false, glsl_sampler_type_is_array(in_var->type),
+      glsl_texture_type(glsl_get_sampler_dim(in_var->type),
+            glsl_sampler_type_is_array(in_var->type),
             nir_get_glsl_base_type_for_nir_type(image_type | 32));
-   return lower_image_deref_impl(b, context, new_var_type, context->num_srvs);
+   return lower_image_deref_impl(b, context, new_var_type, nir_var_uniform, context->num_srvs);
 }
 
 static int
@@ -147,7 +93,7 @@ lower_read_write_image_deref(nir_builder *b, struct clc_image_lower_context *con
       glsl_image_type(glsl_get_sampler_dim(in_var->type),
          glsl_sampler_type_is_array(in_var->type),
          nir_get_glsl_base_type_for_nir_type(image_type | 32));
-   return lower_image_deref_impl(b, context, new_var_type, context->num_uavs);
+   return lower_image_deref_impl(b, context, new_var_type, nir_var_image, context->num_uavs);
 }
 
 static void
@@ -157,8 +103,8 @@ clc_lower_input_image_deref(nir_builder *b, struct clc_image_lower_context *cont
    // image format data.
    //
    // For every use of an image in a different way, we'll add an
-   // appropriate uniform to match it. That can result in up to
-   // 3 uniforms (float4, int4, uint4) for each image. Only one of these
+   // appropriate image to match it. That can result in up to
+   // 3 images (float4, int4, uint4) for each image. Only one of these
    // formats will actually produce correct data, but a single kernel
    // could use runtime conditionals to potentially access any of them.
    //
@@ -169,18 +115,17 @@ clc_lower_input_image_deref(nir_builder *b, struct clc_image_lower_context *cont
    //
    // After all that, we can remove the image input variable and deref.
 
-   enum image_uniform_type {
+   enum image_type {
       FLOAT4,
       INT4,
       UINT4,
-      IMAGE_UNIFORM_TYPE_COUNT
+      IMAGE_TYPE_COUNT
    };
 
-   int image_bindings[IMAGE_UNIFORM_TYPE_COUNT] = {-1, -1, -1};
+   int image_bindings[IMAGE_TYPE_COUNT] = {-1, -1, -1};
    nir_ssa_def *format_deref_dest = NULL, *order_deref_dest = NULL;
 
    nir_variable *in_var = nir_deref_instr_get_variable(context->deref);
-   enum gl_access_qualifier access = in_var->data.access;
 
    context->metadata_index = 0;
    while (context->metadata->args[context->metadata_index].image.buf_ids[0] != in_var->data.binding)
@@ -200,11 +145,11 @@ clc_lower_input_image_deref(nir_builder *b, struct clc_image_lower_context *cont
     */
    for (int pass = 0; pass < 2; ++pass) {
       nir_foreach_use_safe(src, &context->deref->dest.ssa) {
-         enum image_uniform_type type;
+         enum image_type type;
 
          if (src->parent_instr->type == nir_instr_type_intrinsic) {
             nir_intrinsic_instr *intrinsic = nir_instr_as_intrinsic(src->parent_instr);
-            enum nir_alu_type dest_type;
+            nir_alu_type dest_type;
 
             b->cursor = nir_before_instr(&intrinsic->instr);
 
@@ -234,7 +179,7 @@ clc_lower_input_image_deref(nir_builder *b, struct clc_image_lower_context *cont
 
             case nir_intrinsic_image_deref_size: {
                int image_binding = -1;
-               for (unsigned i = 0; i < IMAGE_UNIFORM_TYPE_COUNT; ++i) {
+               for (unsigned i = 0; i < IMAGE_TYPE_COUNT; ++i) {
                   if (image_bindings[i] >= 0) {
                      image_binding = image_bindings[i];
                      break;
@@ -272,7 +217,7 @@ clc_lower_input_image_deref(nir_builder *b, struct clc_image_lower_context *cont
                }
 
                /* No actual intrinsic needed here, just reference the loaded variable */
-               nir_ssa_def_rewrite_uses(&intrinsic->dest.ssa, nir_src_for_ssa(*cached_deref));
+               nir_ssa_def_rewrite_uses(&intrinsic->dest.ssa, *cached_deref);
                nir_instr_remove(&intrinsic->instr);
                break;
             }
@@ -351,10 +296,10 @@ clc_lower_64bit_semantics(nir_shader *nir)
                case nir_intrinsic_load_global_invocation_id_zero_base:
                case nir_intrinsic_load_base_global_invocation_id:
                case nir_intrinsic_load_local_invocation_id:
-               case nir_intrinsic_load_work_group_id:
-               case nir_intrinsic_load_work_group_id_zero_base:
-               case nir_intrinsic_load_base_work_group_id:
-               case nir_intrinsic_load_num_work_groups:
+               case nir_intrinsic_load_workgroup_id:
+               case nir_intrinsic_load_workgroup_id_zero_base:
+               case nir_intrinsic_load_base_workgroup_id:
+               case nir_intrinsic_load_num_workgroups:
                   break;
                default:
                   continue;
@@ -369,7 +314,7 @@ clc_lower_64bit_semantics(nir_shader *nir)
                nir_ssa_def *i64 = nir_u2u64(&b, &intrinsic->dest.ssa);
                nir_ssa_def_rewrite_uses_after(
                   &intrinsic->dest.ssa,
-                  nir_src_for_ssa(i64),
+                  i64,
                   i64->parent_instr);
             }
          }
@@ -449,193 +394,6 @@ clc_lower_nonnormalized_samplers(nir_shader *nir,
    }
 }
 
-
-static void
-clc_context_optimize(nir_shader *s)
-{
-   bool progress;
-   do {
-      progress = false;
-      NIR_PASS(progress, s, nir_split_var_copies);
-      NIR_PASS(progress, s, nir_opt_copy_prop_vars);
-      NIR_PASS(progress, s, nir_lower_var_copies);
-      NIR_PASS(progress, s, nir_lower_vars_to_ssa);
-      NIR_PASS(progress, s, nir_copy_prop);
-      NIR_PASS(progress, s, nir_opt_remove_phis);
-      NIR_PASS(progress, s, nir_opt_dce);
-      NIR_PASS(progress, s, nir_opt_if, true);
-      NIR_PASS(progress, s, nir_opt_dead_cf);
-      NIR_PASS(progress, s, nir_opt_cse);
-      NIR_PASS(progress, s, nir_opt_peephole_select, 8, true, true);
-      NIR_PASS(progress, s, nir_opt_algebraic);
-      NIR_PASS(progress, s, nir_opt_constant_folding);
-      NIR_PASS(progress, s, nir_opt_undef);
-      NIR_PASS(progress, s, nir_lower_undef_to_zero);
-      NIR_PASS(progress, s, nir_opt_deref);
-   } while (progress);
-}
-
-struct clc_context *
-clc_context_new(const struct clc_logger *logger, const struct clc_context_options *options)
-{
-   struct clc_context *ctx = rzalloc(NULL, struct clc_context);
-   if (!ctx) {
-      clc_error(logger, "D3D12: failed to allocate a clc_context");
-      return NULL;
-   }
-
-   const struct spirv_to_nir_options libclc_spirv_options = {
-      .environment = NIR_SPIRV_OPENCL,
-      .create_library = true,
-      .constant_addr_format = nir_address_format_32bit_index_offset_pack64,
-      .global_addr_format = nir_address_format_32bit_index_offset_pack64,
-      .shared_addr_format = nir_address_format_32bit_offset_as_64bit,
-      .temp_addr_format = nir_address_format_32bit_offset_as_64bit,
-      .float_controls_execution_mode = FLOAT_CONTROLS_DENORM_FLUSH_TO_ZERO_FP32,
-      .caps = {
-         .address = true,
-         .float64 = true,
-         .int8 = true,
-         .int16 = true,
-         .int64 = true,
-         .kernel = true,
-      },
-   };
-   const struct nir_shader_compiler_options *libclc_nir_options =
-      dxil_get_nir_compiler_options();
-
-   glsl_type_singleton_init_or_ref();
-   nir_shader *s = nir_load_libclc_shader(64, NULL, &libclc_spirv_options, libclc_nir_options);
-   if (!s) {
-      clc_error(logger, "D3D12: spirv_to_nir failed on libclc blob");
-      ralloc_free(ctx);
-      return NULL;
-   }
-
-   if (options && options->optimize)
-      clc_context_optimize(s);
-
-   ralloc_steal(ctx, s);
-   ctx->libclc_nir = s;
-
-   return ctx;
-}
-
-void
-clc_free_context(struct clc_context *ctx)
-{
-   ralloc_free(ctx);
-   glsl_type_singleton_decref();
-};
-
-void clc_context_serialize(struct clc_context *context,
-                           void **serialized,
-                           size_t *serialized_size)
-{
-   struct blob tmp;
-   blob_init(&tmp);
-   nir_serialize(&tmp, context->libclc_nir, true);
-
-   blob_finish_get_buffer(&tmp, serialized, serialized_size);
-}
-
-void clc_context_free_serialized(void *serialized)
-{
-   free(serialized);
-}
-
-struct clc_context *
-   clc_context_deserialize(const void *serialized, size_t serialized_size)
-{
-   struct clc_context *ctx = rzalloc(NULL, struct clc_context);
-   if (!ctx) {
-      return NULL;
-   }
-   const struct nir_shader_compiler_options *libclc_nir_options =
-      dxil_get_nir_compiler_options();
-
-   glsl_type_singleton_init_or_ref();
-
-   struct blob_reader tmp;
-   blob_reader_init(&tmp, serialized, serialized_size);
-
-   nir_shader *s = nir_deserialize(NULL, libclc_nir_options, &tmp);
-   if (!s) {
-      ralloc_free(ctx);
-      return NULL;
-   }
-
-   ralloc_steal(ctx, s);
-   ctx->libclc_nir = s;
-
-   return ctx;
-}
-
-struct clc_object *
-clc_compile(struct clc_context *ctx,
-            const struct clc_compile_args *args,
-            const struct clc_logger *logger)
-{
-   struct clc_object *obj;
-   int ret;
-
-   obj = calloc(1, sizeof(*obj));
-   if (!obj) {
-      clc_error(logger, "D3D12: failed to allocate a clc_object");
-      return NULL;
-   }
-
-   ret = clc_to_spirv(args, &obj->spvbin, logger);
-   if (ret < 0) {
-      free(obj);
-      return NULL;
-   }
-
-   if (debug_get_option_debug_clc() & CLC_DEBUG_DUMP_SPIRV)
-      clc_dump_spirv(&obj->spvbin, stdout);
-
-   return obj;
-}
-
-struct clc_object *
-clc_link(struct clc_context *ctx,
-         const struct clc_linker_args *args,
-         const struct clc_logger *logger)
-{
-   struct clc_object *out_obj;
-   int ret;
-
-   out_obj = malloc(sizeof(*out_obj));
-   if (!out_obj) {
-      clc_error(logger, "failed to allocate a clc_object");
-      return NULL;
-   }
-
-   ret = clc_link_spirv_binaries(args, &out_obj->spvbin, logger);
-   if (ret < 0) {
-      free(out_obj);
-      return NULL;
-   }
-
-   if (debug_get_option_debug_clc() & CLC_DEBUG_DUMP_SPIRV)
-      clc_dump_spirv(&out_obj->spvbin, stdout);
-
-   out_obj->kernels = clc_spirv_get_kernels_info(&out_obj->spvbin,
-                                                 &out_obj->num_kernels);
-
-   if (debug_get_option_debug_clc() & CLC_DEBUG_VERBOSE)
-      clc_print_kernels_info(out_obj);
-
-   return out_obj;
-}
-
-void clc_free_object(struct clc_object *obj)
-{
-   clc_free_kernels_info(obj->kernels, obj->num_kernels);
-   clc_free_spirv_binary(&obj->spvbin);
-   free(obj);
-}
-
 static nir_variable *
 add_kernel_inputs_var(struct clc_dxil_object *dxil, nir_shader *nir,
                       unsigned *cbv_id)
@@ -643,7 +401,6 @@ add_kernel_inputs_var(struct clc_dxil_object *dxil, nir_shader *nir,
    if (!dxil->kernel->num_args)
       return NULL;
 
-   struct clc_dxil_metadata *metadata = &dxil->metadata;
    unsigned size = 0;
 
    nir_foreach_variable_with_modes(var, nir, nir_var_uniform)
@@ -653,11 +410,12 @@ add_kernel_inputs_var(struct clc_dxil_object *dxil, nir_shader *nir,
 
    size = align(size, 4);
 
+   const struct glsl_type *array_type = glsl_array_type(glsl_uint_type(), size / 4, 4);
+   const struct glsl_struct_field field = { array_type, "arr" };
    nir_variable *var =
       nir_variable_create(nir, nir_var_mem_ubo,
-                          glsl_array_type(glsl_uint_type(),
-                                          size / 4, 0),
-                          "kernel_inputs");
+         glsl_struct_type(&field, 1, "kernel_inputs", false),
+         "kernel_inputs");
    var->data.binding = (*cbv_id)++;
    var->data.how_declared = nir_var_hidden;
    return var;
@@ -667,13 +425,15 @@ static nir_variable *
 add_work_properties_var(struct clc_dxil_object *dxil,
                            struct nir_shader *nir, unsigned *cbv_id)
 {
-   struct clc_dxil_metadata *metadata = &dxil->metadata;
+   const struct glsl_type *array_type =
+      glsl_array_type(glsl_uint_type(),
+         sizeof(struct clc_work_properties_data) / sizeof(unsigned),
+         sizeof(unsigned));
+   const struct glsl_struct_field field = { array_type, "arr" };
    nir_variable *var =
       nir_variable_create(nir, nir_var_mem_ubo,
-                          glsl_array_type(glsl_uint_type(),
-                                          sizeof(struct clc_work_properties_data) / sizeof(unsigned),
-                                          0),
-                          "kernel_work_properies");
+         glsl_struct_type(&field, 1, "kernel_work_properties", false),
+         "kernel_work_properies");
    var->data.binding = (*cbv_id)++;
    var->data.how_declared = nir_var_hidden;
    return var;
@@ -746,8 +506,6 @@ static void
 copy_const_initializer(const nir_constant *constant, const struct glsl_type *type,
                        uint8_t *data)
 {
-   unsigned size = glsl_get_cl_size(type);
-
    if (glsl_type_is_array(type)) {
       const struct glsl_type *elm_type = glsl_get_array_element(type);
       unsigned step_size = glsl_get_explicit_stride(type);
@@ -826,7 +584,7 @@ split_unaligned_load(nir_builder *b, nir_intrinsic_instr *intrin, unsigned align
    }
 
    nir_ssa_def *new_dest = nir_extract_bits(b, srcs, num_loads, 0, num_comps, intrin->dest.ssa.bit_size);
-   nir_ssa_def_rewrite_uses(&intrin->dest.ssa, nir_src_for_ssa(new_dest));
+   nir_ssa_def_rewrite_uses(&intrin->dest.ssa, new_dest);
    nir_instr_remove(&intrin->instr);
 }
 
@@ -884,7 +642,7 @@ split_unaligned_loads_stores(nir_shader *shader)
 
             unsigned alignment = align_offset ? 1 << (ffs(align_offset) - 1) : align_mul;
 
-            /* We can load anything at 4-byte alignment, except for 
+            /* We can load anything at 4-byte alignment, except for
              * UBOs (AKA CBs where the granularity is 16 bytes).
              */
             if (alignment >= (deref->modes == nir_var_mem_ubo ? 16 : 4))
@@ -936,8 +694,6 @@ wrap_from_cl_addressing(unsigned addressing_mode)
 
 static bool shader_has_double(nir_shader *nir)
 {
-   bool progress = false;
-
    foreach_list_typed(nir_function, func, node, &nir->functions) {
       if (!func->is_entrypoint)
          continue;
@@ -962,82 +718,45 @@ static bool shader_has_double(nir_shader *nir)
    return false;
 }
 
-static bool
-scale_fdiv(nir_shader *nir)
+struct clc_libclc *
+clc_libclc_new_dxil(const struct clc_logger *logger,
+                    const struct clc_libclc_dxil_options *options)
 {
-   bool progress = false;
-   nir_foreach_function(func, nir) {
-      if (!func->impl)
-         continue;
-      nir_builder b;
-      nir_builder_init(&b, func->impl);
-      nir_foreach_block(block, func->impl) {
-         nir_foreach_instr(instr, block) {
-            if (instr->type != nir_instr_type_alu)
-               continue;
-            nir_alu_instr *alu = nir_instr_as_alu(instr);
-            if (alu->op != nir_op_fdiv)
-               continue;
+   struct clc_libclc_options clc_options = {
+      .optimize = options->optimize,
+      .nir_options = dxil_get_nir_compiler_options(),
+   };
 
-            b.cursor = nir_before_instr(instr);
-            nir_ssa_def *fabs = nir_fabs(&b, alu->src[1].src.ssa);
-            nir_ssa_def *big = nir_flt(&b, nir_imm_int(&b, 0x7e800000), fabs);
-            nir_ssa_def *small = nir_flt(&b, fabs, nir_imm_int(&b, 0x00800000));
-
-            nir_ssa_def *scaled_down_a = nir_fmul_imm(&b, alu->src[0].src.ssa, 0.25);
-            nir_ssa_def *scaled_down_b = nir_fmul_imm(&b, alu->src[1].src.ssa, 0.25);
-            nir_ssa_def *scaled_up_a = nir_fmul_imm(&b, alu->src[0].src.ssa, 16777216.0);
-            nir_ssa_def *scaled_up_b = nir_fmul_imm(&b, alu->src[1].src.ssa, 16777216.0);
-
-            nir_ssa_def *final_a =
-               nir_bcsel(&b, big, scaled_down_a,
-              (nir_bcsel(&b, small, scaled_up_a, alu->src[0].src.ssa)));
-            nir_ssa_def *final_b =
-               nir_bcsel(&b, big, scaled_down_b,
-              (nir_bcsel(&b, small, scaled_up_b, alu->src[1].src.ssa)));
-
-            nir_instr_rewrite_src(instr, &alu->src[0].src, nir_src_for_ssa(final_a));
-            nir_instr_rewrite_src(instr, &alu->src[1].src, nir_src_for_ssa(final_b));
-            progress = true;
-         }
-      }
-   }
-   return progress;
+   return clc_libclc_new(logger, &clc_options);
 }
 
-struct clc_dxil_object *
-clc_to_dxil(struct clc_context *ctx,
-            const struct clc_object *obj,
-            const char *entrypoint,
-            const struct clc_runtime_kernel_conf *conf,
-            const struct clc_logger *logger)
+bool
+clc_spirv_to_dxil(struct clc_libclc *lib,
+                  const struct clc_binary *linked_spirv,
+                  const struct clc_parsed_spirv *parsed_data,
+                  const char *entrypoint,
+                  const struct clc_runtime_kernel_conf *conf,
+                  const struct clc_spirv_specialization_consts *consts,
+                  const struct clc_logger *logger,
+                  struct clc_dxil_object *out_dxil)
 {
-   struct clc_dxil_object *dxil;
    struct nir_shader *nir;
-   char *err_log;
-   int ret;
 
-   dxil = calloc(1, sizeof(*dxil));
-   if (!dxil) {
-      clc_error(logger, "failed to allocate the dxil object");
-      return NULL;
-   }
-
-   for (unsigned i = 0; i < obj->num_kernels; i++) {
-      if (!strcmp(obj->kernels[i].name, entrypoint)) {
-         dxil->kernel = &obj->kernels[i];
+   for (unsigned i = 0; i < parsed_data->num_kernels; i++) {
+      if (!strcmp(parsed_data->kernels[i].name, entrypoint)) {
+         out_dxil->kernel = &parsed_data->kernels[i];
          break;
       }
    }
 
-   if (!dxil->kernel) {
+   if (!out_dxil->kernel) {
       clc_error(logger, "no '%s' kernel found", entrypoint);
-      goto err_free_dxil;
+      return false;
    }
 
    const struct spirv_to_nir_options spirv_options = {
       .environment = NIR_SPIRV_OPENCL,
-      .clc_shader = ctx->libclc_nir,
+      .clc_shader = clc_libclc_get_clc_shader(lib),
       .constant_addr_format = nir_address_format_32bit_index_offset_pack64,
       .global_addr_format = nir_address_format_32bit_index_offset_pack64,
       .shared_addr_format = nir_address_format_32bit_offset_as_64bit,
@@ -1051,6 +770,7 @@ clc_to_dxil(struct clc_context *ctx,
          .int64 = true,
          .kernel = true,
          .kernel_image = true,
+         .kernel_image_read_write = true,
          .literal_sampler = true,
          .printf = true,
       },
@@ -1069,8 +789,9 @@ clc_to_dxil(struct clc_context *ctx,
 
    glsl_type_singleton_init_or_ref();
 
-   nir = spirv_to_nir(obj->spvbin.data, obj->spvbin.size / 4,
-                      NULL, 0,
+   nir = spirv_to_nir(linked_spirv->data, linked_spirv->size / 4,
+                      consts ? (struct nir_spirv_specialization *)consts->specializations : NULL,
+                      consts ? consts->num_specializations : 0,
                       MESA_SHADER_KERNEL, entrypoint,
                       &spirv_options,
                       &nir_options);
@@ -1078,75 +799,18 @@ clc_to_dxil(struct clc_context *ctx,
       clc_error(logger, "spirv_to_nir() failed");
       goto err_free_dxil;
    }
-   nir->info.cs.local_size_variable = true;
+   nir->info.workgroup_size_variable = true;
 
    NIR_PASS_V(nir, nir_lower_goto_ifs);
    NIR_PASS_V(nir, nir_opt_dead_cf);
 
-   struct clc_dxil_metadata *metadata = &dxil->metadata;
+   struct clc_dxil_metadata *metadata = &out_dxil->metadata;
 
-   metadata->args = calloc(dxil->kernel->num_args,
+   metadata->args = calloc(out_dxil->kernel->num_args,
                            sizeof(*metadata->args));
    if (!metadata->args) {
       clc_error(logger, "failed to allocate arg positions");
       goto err_free_dxil;
-   }
-
-   // Calculate input offsets/metadata.
-   unsigned uav_id = 0, sampler_id = 0, offset = 0;
-   dxil_wrap_sampler_state int_sampler_states[PIPE_MAX_SHADER_SAMPLER_VIEWS] = {{{0}}};
-   nir_foreach_variable_with_modes(var, nir, nir_var_uniform) {
-      int i = var->data.location;
-      if (i < 0)
-         continue;
-
-      unsigned size = glsl_get_cl_size(var->type);
-      offset = align(offset, glsl_get_cl_alignment(var->type));
-      var->data.driver_location = offset;
-
-      metadata->args[i].offset = offset;
-      metadata->args[i].size = size;
-      metadata->kernel_inputs_buf_size = MAX2(metadata->kernel_inputs_buf_size,
-                                              offset + size);
-      if ((dxil->kernel->args[i].address_qualifier == CLC_KERNEL_ARG_ADDRESS_GLOBAL ||
-           dxil->kernel->args[i].address_qualifier == CLC_KERNEL_ARG_ADDRESS_CONSTANT) &&
-          // Ignore images during this pass - global memory buffers need to have contiguous bindings
-          !glsl_type_is_image(var->type)) {
-         metadata->args[i].globconstptr.buf_id = uav_id++;
-      } else if (glsl_type_is_sampler(var->type)) {
-         unsigned address_mode = conf ? conf->args[i].sampler.addressing_mode : 0u;
-         int_sampler_states[sampler_id].wrap[0] =
-            int_sampler_states[sampler_id].wrap[1] =
-            int_sampler_states[sampler_id].wrap[2] = wrap_from_cl_addressing(address_mode);
-         int_sampler_states[sampler_id].is_nonnormalized_coords =
-            conf ? !conf->args[i].sampler.normalized_coords : 0;
-         int_sampler_states[sampler_id].is_linear_filtering =
-            conf ? conf->args[i].sampler.linear_filtering : 0;
-         metadata->args[i].sampler.sampler_id = var->data.binding = sampler_id++;
-      }
-      offset += size;
-   }
-
-   unsigned num_global_inputs = uav_id;
-
-   // Second pass over inputs to calculate image bindings
-   unsigned srv_id = 0;
-   nir_foreach_variable_with_modes(var, nir, nir_var_uniform) {
-      int i = var->data.location;
-      if (i < 0)
-         continue;
-
-      if (glsl_type_is_image(var->type)) {
-         if (var->data.access == ACCESS_NON_WRITEABLE) {
-            metadata->args[i].image.buf_ids[0] = srv_id++;
-         } else {
-            // Write or read-write are UAVs
-            metadata->args[i].image.buf_ids[0] = uav_id++;
-         }
-
-         metadata->args[i].image.num_buf_ids = 1;
-         var->data.binding = metadata->args[i].image.buf_ids[0];
-      }
    }
 
    {
@@ -1170,15 +834,11 @@ clc_to_dxil(struct clc_context *ctx,
    // according to the comment on nir_inline_functions
    NIR_PASS_V(nir, nir_lower_variable_initializers, nir_var_function_temp);
    NIR_PASS_V(nir, nir_lower_returns);
-   NIR_PASS_V(nir, nir_lower_libclc, ctx->libclc_nir);
+   NIR_PASS_V(nir, nir_lower_libclc, clc_libclc_get_clc_shader(lib));
    NIR_PASS_V(nir, nir_inline_functions);
 
    // Pick off the single entrypoint that we want.
-   foreach_list_typed_safe(nir_function, func, node, &nir->functions) {
-      if (!func->is_entrypoint)
-         exec_node_remove(&func->node);
-   }
-   assert(exec_list_length(&nir->functions) == 1);
+   nir_remove_non_entrypoints(nir);
 
    {
       bool progress;
@@ -1196,7 +856,7 @@ clc_to_dxil(struct clc_context *ctx,
          NIR_PASS(progress, nir, nir_lower_var_copies);
          NIR_PASS(progress, nir, nir_lower_vars_to_ssa);
          NIR_PASS(progress, nir, nir_opt_algebraic);
-         NIR_PASS(progress, nir, nir_opt_if, true);
+         NIR_PASS(progress, nir, nir_opt_if, nir_opt_if_aggressive_last_continue | nir_opt_if_optimize_phi_true_false);
          NIR_PASS(progress, nir, nir_opt_dead_cf);
          NIR_PASS(progress, nir, nir_opt_remove_phis);
          NIR_PASS(progress, nir, nir_opt_peephole_select, 8, true, true);
@@ -1204,43 +864,21 @@ clc_to_dxil(struct clc_context *ctx,
       } while (progress);
    }
 
-   // Before removing dead uniforms, dedupe constant samplers to make more dead uniforms
-   NIR_PASS_V(nir, clc_nir_dedupe_const_samplers);
-   NIR_PASS_V(nir, nir_remove_dead_variables, nir_var_uniform | nir_var_mem_ubo | nir_var_mem_constant | nir_var_function_temp, NULL);
+   NIR_PASS_V(nir, nir_scale_fdiv);
 
-   NIR_PASS_V(nir, scale_fdiv);
-
-   // Assign bindings for constant samplers
-   nir_foreach_variable_with_modes(var, nir, nir_var_uniform) {
-      if (glsl_type_is_sampler(var->type) && var->data.sampler.is_inline_sampler) {
-         int_sampler_states[sampler_id].wrap[0] =
-            int_sampler_states[sampler_id].wrap[0] =
-            int_sampler_states[sampler_id].wrap[0] =
-            wrap_from_cl_addressing(var->data.sampler.addressing_mode);
-         int_sampler_states[sampler_id].is_nonnormalized_coords =
-            !var->data.sampler.normalized_coordinates;
-         int_sampler_states[sampler_id].is_linear_filtering =
-            var->data.sampler.filter_mode == SAMPLER_FILTER_MODE_LINEAR;
-         var->data.binding = sampler_id++;
-
-         assert(metadata->num_const_samplers < CLC_MAX_SAMPLERS);
-         metadata->const_samplers[metadata->num_const_samplers].sampler_id = var->data.binding;
-         metadata->const_samplers[metadata->num_const_samplers].addressing_mode = var->data.sampler.addressing_mode;
-         metadata->const_samplers[metadata->num_const_samplers].normalized_coords = var->data.sampler.normalized_coordinates;
-         metadata->const_samplers[metadata->num_const_samplers].filter_mode = var->data.sampler.filter_mode;
-         metadata->num_const_samplers++;
-      }
-   }
+   dxil_wrap_sampler_state int_sampler_states[PIPE_MAX_SHADER_SAMPLER_VIEWS] = { {{0}} };
+   unsigned sampler_id = 0;
 
    NIR_PASS_V(nir, nir_lower_variable_initializers, ~(nir_var_function_temp | nir_var_shader_temp));
-
-   // Lower memcpy
-   NIR_PASS_V(nir, dxil_nir_lower_memcpy_deref);
 
    // Ensure the printf struct has explicit types, but we'll throw away the scratch size, because we haven't
    // necessarily removed all temp variables (e.g. the printf struct itself) at this point, so we'll rerun this later
    assert(nir->scratch_size == 0);
    NIR_PASS_V(nir, nir_lower_vars_to_explicit_types, nir_var_function_temp, glsl_get_cl_type_size_align);
+
+   // Lower memcpy
+   NIR_PASS_V(nir, nir_opt_memcpy);
+   NIR_PASS_V(nir, nir_lower_memcpy);
 
    nir_lower_printf_options printf_options = {
       .treat_doubles_as_floats = true,
@@ -1267,8 +905,95 @@ clc_to_dxil(struct clc_context *ctx,
    NIR_PASS_V(nir, nir_opt_dce);
    NIR_PASS_V(nir, nir_opt_deref);
 
+   // For uniforms (kernel inputs, minus images), run this before adjusting variable list via image/sampler lowering
+   NIR_PASS_V(nir, nir_lower_vars_to_explicit_types, nir_var_uniform, glsl_get_cl_type_size_align);
+
+   // Calculate input offsets/metadata.
+   unsigned uav_id = 0;
+   nir_foreach_variable_with_modes(var, nir, nir_var_uniform) {
+      int i = var->data.location;
+      if (i < 0)
+         continue;
+
+      unsigned size = glsl_get_cl_size(var->type);
+
+      metadata->args[i].offset = var->data.driver_location;
+      metadata->args[i].size = size;
+      metadata->kernel_inputs_buf_size = MAX2(metadata->kernel_inputs_buf_size,
+         var->data.driver_location + size);
+      if (out_dxil->kernel->args[i].address_qualifier == CLC_KERNEL_ARG_ADDRESS_GLOBAL ||
+          out_dxil->kernel->args[i].address_qualifier == CLC_KERNEL_ARG_ADDRESS_CONSTANT) {
+         metadata->args[i].globconstptr.buf_id = uav_id++;
+      } else if (glsl_type_is_sampler(var->type)) {
+         unsigned address_mode = conf ? conf->args[i].sampler.addressing_mode : 0u;
+         int_sampler_states[sampler_id].wrap[0] =
+            int_sampler_states[sampler_id].wrap[1] =
+            int_sampler_states[sampler_id].wrap[2] = wrap_from_cl_addressing(address_mode);
+         int_sampler_states[sampler_id].is_nonnormalized_coords =
+            conf ? !conf->args[i].sampler.normalized_coords : 0;
+         int_sampler_states[sampler_id].is_linear_filtering =
+            conf ? conf->args[i].sampler.linear_filtering : 0;
+         metadata->args[i].sampler.sampler_id = var->data.binding = sampler_id++;
+      }
+   }
+
+   unsigned num_global_inputs = uav_id;
+
+   // Second pass over inputs to calculate image bindings
+   unsigned srv_id = 0;
+   nir_foreach_image_variable(var, nir) {
+      int i = var->data.location;
+      if (i < 0)
+         continue;
+
+      assert(glsl_type_is_image(var->type));
+
+      if (var->data.access == ACCESS_NON_WRITEABLE) {
+         metadata->args[i].image.buf_ids[0] = srv_id++;
+      } else {
+         // Write or read-write are UAVs
+         metadata->args[i].image.buf_ids[0] = uav_id++;
+      }
+
+      metadata->args[i].image.num_buf_ids = 1;
+      var->data.binding = metadata->args[i].image.buf_ids[0];
+
+      // Assign location that'll be used for uniforms for format/order
+      var->data.driver_location = metadata->kernel_inputs_buf_size;
+      metadata->args[i].offset = metadata->kernel_inputs_buf_size;
+      metadata->args[i].size = 8;
+      metadata->kernel_inputs_buf_size += metadata->args[i].size;
+   }
+
+   // Before removing dead uniforms, dedupe inline samplers to make more dead uniforms
+   NIR_PASS_V(nir, nir_dedup_inline_samplers);
+   NIR_PASS_V(nir, nir_remove_dead_variables, nir_var_uniform | nir_var_mem_ubo |
+              nir_var_mem_constant | nir_var_function_temp | nir_var_image, NULL);
+
+   // Fill out inline sampler metadata, now that they've been deduped and dead ones removed
+   nir_foreach_variable_with_modes(var, nir, nir_var_uniform) {
+      if (glsl_type_is_sampler(var->type) && var->data.sampler.is_inline_sampler) {
+         int_sampler_states[sampler_id].wrap[0] =
+            int_sampler_states[sampler_id].wrap[1] =
+            int_sampler_states[sampler_id].wrap[2] =
+            wrap_from_cl_addressing(var->data.sampler.addressing_mode);
+         int_sampler_states[sampler_id].is_nonnormalized_coords =
+            !var->data.sampler.normalized_coordinates;
+         int_sampler_states[sampler_id].is_linear_filtering =
+            var->data.sampler.filter_mode == SAMPLER_FILTER_MODE_LINEAR;
+         var->data.binding = sampler_id++;
+
+         assert(metadata->num_const_samplers < CLC_MAX_SAMPLERS);
+         metadata->const_samplers[metadata->num_const_samplers].sampler_id = var->data.binding;
+         metadata->const_samplers[metadata->num_const_samplers].addressing_mode = var->data.sampler.addressing_mode;
+         metadata->const_samplers[metadata->num_const_samplers].normalized_coords = var->data.sampler.normalized_coordinates;
+         metadata->const_samplers[metadata->num_const_samplers].filter_mode = var->data.sampler.filter_mode;
+         metadata->num_const_samplers++;
+      }
+   }
+
    // Needs to come before lower_explicit_io
-   NIR_PASS_V(nir, nir_lower_cl_images_to_tex);
+   NIR_PASS_V(nir, nir_lower_readonly_images_to_tex, false);
    struct clc_image_lower_context image_lower_context = { metadata, &srv_id, &uav_id };
    NIR_PASS_V(nir, clc_lower_images, &image_lower_context);
    NIR_PASS_V(nir, clc_lower_nonnormalized_samplers, int_sampler_states);
@@ -1280,11 +1005,11 @@ clc_to_dxil(struct clc_context *ctx,
 
    nir->scratch_size = 0;
    NIR_PASS_V(nir, nir_lower_vars_to_explicit_types,
-              nir_var_mem_shared | nir_var_function_temp | nir_var_uniform | nir_var_mem_global | nir_var_mem_constant,
+              nir_var_mem_shared | nir_var_function_temp | nir_var_mem_global | nir_var_mem_constant,
               glsl_get_cl_type_size_align);
 
    NIR_PASS_V(nir, dxil_nir_lower_ubo_to_temp);
-   NIR_PASS_V(nir, clc_lower_constant_to_ssbo, dxil->kernel, &uav_id);
+   NIR_PASS_V(nir, clc_lower_constant_to_ssbo, out_dxil->kernel, &uav_id);
    NIR_PASS_V(nir, clc_lower_global_to_ssbo);
 
    bool has_printf = false;
@@ -1306,7 +1031,7 @@ clc_to_dxil(struct clc_context *ctx,
 
    nir_lower_compute_system_values_options compute_options = {
       .has_base_global_invocation_id = (conf && conf->support_global_work_id_offsets),
-      .has_base_work_group_id = (conf && conf->support_work_group_id_offsets),
+      .has_base_workgroup_id = (conf && conf->support_workgroup_id_offsets),
    };
    NIR_PASS_V(nir, nir_lower_compute_system_values, &compute_options);
 
@@ -1318,24 +1043,37 @@ clc_to_dxil(struct clc_context *ctx,
    unsigned cbv_id = 0;
 
    nir_variable *inputs_var =
-      add_kernel_inputs_var(dxil, nir, &cbv_id);
+      add_kernel_inputs_var(out_dxil, nir, &cbv_id);
    nir_variable *work_properties_var =
-      add_work_properties_var(dxil, nir, &cbv_id);
+      add_work_properties_var(out_dxil, nir, &cbv_id);
+
+   memcpy(metadata->local_size, nir->info.workgroup_size,
+          sizeof(metadata->local_size));
+   memcpy(metadata->local_size_hint, nir->info.cs.workgroup_size_hint,
+          sizeof(metadata->local_size));
 
    // Patch the localsize before calling clc_nir_lower_system_values().
    if (conf) {
-      for (unsigned i = 0; i < ARRAY_SIZE(nir->info.cs.local_size); i++) {
+      for (unsigned i = 0; i < ARRAY_SIZE(nir->info.workgroup_size); i++) {
          if (!conf->local_size[i] ||
-             conf->local_size[i] == nir->info.cs.local_size[i])
+             conf->local_size[i] == nir->info.workgroup_size[i])
             continue;
 
-         if (nir->info.cs.local_size[i] &&
-             nir->info.cs.local_size[i] != conf->local_size[i]) {
+         if (nir->info.workgroup_size[i] &&
+             nir->info.workgroup_size[i] != conf->local_size[i]) {
             debug_printf("D3D12: runtime local size does not match reqd_work_group_size() values\n");
             goto err_free_dxil;
          }
 
-         nir->info.cs.local_size[i] = conf->local_size[i];
+         nir->info.workgroup_size[i] = conf->local_size[i];
+      }
+      memcpy(metadata->local_size, nir->info.workgroup_size,
+            sizeof(metadata->local_size));
+   } else {
+      /* Make sure there's at least one thread that's set to run */
+      for (unsigned i = 0; i < ARRAY_SIZE(nir->info.workgroup_size); i++) {
+         if (nir->info.workgroup_size[i] == 0)
+            nir->info.workgroup_size[i] = 1;
       }
    }
 
@@ -1347,7 +1085,7 @@ clc_to_dxil(struct clc_context *ctx,
    NIR_PASS_V(nir, dxil_nir_lower_loads_stores_to_dxil);
    NIR_PASS_V(nir, dxil_nir_opt_alu_deref_srcs);
    NIR_PASS_V(nir, dxil_nir_lower_atomics_to_dxil);
-   NIR_PASS_V(nir, dxil_nir_lower_fp16_casts);
+   NIR_PASS_V(nir, nir_lower_fp16_casts);
    NIR_PASS_V(nir, nir_lower_convert_alu_types, NULL);
 
    // Convert pack to pack_split
@@ -1361,17 +1099,19 @@ clc_to_dxil(struct clc_context *ctx,
    struct nir_to_dxil_options opts = {
       .interpolate_at_vertex = false,
       .lower_int16 = (conf && (conf->lower_bit_size & 16) != 0),
-      .ubo_binding_offset = 0,
       .disable_math_refactoring = true,
       .num_kernel_globals = num_global_inputs,
+      .environment = DXIL_ENVIRONMENT_CL,
+      .shader_model_max = SHADER_MODEL_6_2,
+      .validator_version_max = DXIL_VALIDATOR_1_4,
    };
 
-   for (unsigned i = 0; i < dxil->kernel->num_args; i++) {
-      if (dxil->kernel->args[i].address_qualifier != CLC_KERNEL_ARG_ADDRESS_LOCAL)
+   for (unsigned i = 0; i < out_dxil->kernel->num_args; i++) {
+      if (out_dxil->kernel->args[i].address_qualifier != CLC_KERNEL_ARG_ADDRESS_LOCAL)
          continue;
 
       /* If we don't have the runtime conf yet, we just create a dummy variable.
-       * This will be adjusted when clc_to_dxil() is called with a conf
+       * This will be adjusted when clc_spirv_to_dxil() is called with a conf
        * argument.
        */
       unsigned size = 4;
@@ -1387,12 +1127,12 @@ clc_to_dxil(struct clc_context *ctx,
        */
       unsigned alignment = size < 128 ? (1 << (ffs(size) - 1)) : 128;
 
-      nir->info.cs.shared_size = align(nir->info.cs.shared_size, alignment);
-      metadata->args[i].localptr.sharedmem_offset = nir->info.cs.shared_size;
-      nir->info.cs.shared_size += size;
+      nir->info.shared_size = align(nir->info.shared_size, alignment);
+      metadata->args[i].localptr.sharedmem_offset = nir->info.shared_size;
+      nir->info.shared_size += size;
    }
 
-   metadata->local_mem_size = nir->info.cs.shared_size;
+   metadata->local_mem_size = nir->info.shared_size;
    metadata->priv_mem_size = nir->scratch_size;
 
    /* DXIL double math is too limited compared to what NIR expects. Let's refuse
@@ -1404,16 +1144,14 @@ clc_to_dxil(struct clc_context *ctx,
       goto err_free_dxil;
    }
 
+   struct dxil_logger dxil_logger = { .priv = logger ? logger->priv : NULL,
+                                     .log = logger ? logger->error : NULL};
+
    struct blob tmp;
-   if (!nir_to_dxil(nir, &opts, &tmp)) {
+   if (!nir_to_dxil(nir, &opts, logger ? &dxil_logger : NULL, &tmp)) {
       debug_printf("D3D12: nir_to_dxil failed\n");
       goto err_free_dxil;
    }
-
-   memcpy(metadata->local_size, nir->info.cs.local_size,
-          sizeof(metadata->local_size));
-   memcpy(metadata->local_size_hint, nir->info.cs.local_size_hint,
-          sizeof(metadata->local_size));
 
    nir_foreach_variable_with_modes(var, nir, nir_var_mem_ssbo) {
       if (var->constant_initializer) {
@@ -1442,13 +1180,13 @@ clc_to_dxil(struct clc_context *ctx,
    ralloc_free(nir);
    glsl_type_singleton_decref();
 
-   blob_finish_get_buffer(&tmp, &dxil->binary.data,
-                          &dxil->binary.size);
-   return dxil;
+   blob_finish_get_buffer(&tmp, &out_dxil->binary.data,
+                          &out_dxil->binary.size);
+   return true;
 
 err_free_dxil:
-   clc_free_dxil_object(dxil);
-   return NULL;
+   clc_free_dxil_object(out_dxil);
+   return false;
 }
 
 void clc_free_dxil_object(struct clc_dxil_object *dxil)
@@ -1463,10 +1201,9 @@ void clc_free_dxil_object(struct clc_dxil_object *dxil)
    free(dxil->metadata.printf.infos);
 
    free(dxil->binary.data);
-   free(dxil);
 }
 
-uint64_t clc_compiler_get_version()
+uint64_t clc_compiler_get_version(void)
 {
    const char sha1[] = MESA_GIT_SHA1;
    const char* dash = strchr(sha1, '-');

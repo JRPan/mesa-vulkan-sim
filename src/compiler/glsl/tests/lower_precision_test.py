@@ -19,7 +19,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from __future__ import print_function
 import sys
 import subprocess
 import tempfile
@@ -689,7 +688,7 @@ TESTS = [
              gl_FragColor = vec4(b * a, 0.0, 0.0);
          }
          """,
-         r'\(expression +f16vec2 \*.*\bf16mat2\b'),
+         r'\(expression +f16vec2 \* \(var_ref b\) \(var_ref a\)'),
     Test("f32 simple struct deref",
          """
          precision mediump float;
@@ -1269,7 +1268,7 @@ TESTS = [
                  color2 = y + 1;
          }
          """,
-         r'assign  \(x\) \(var_ref x\)  \(expression float f162f'),
+         r'assign  \(x\) \(var_ref compiler_temp@2\)  \(expression uint bitcast_f2u \(expression float f162f'),
     Test("ldexp",
          """
          #version 310 es
@@ -1302,7 +1301,7 @@ TESTS = [
                  color *= carry;
          }
          """,
-         r'expression uint \+ \(var_ref x\) \(var_ref y'),
+         r'expression uint \+ \(expression uint u2u \(expression uint16_t \* \(expression uint16_t u2ump \(var_ref x\) \) \(constant uint16_t \(2\)\) \) \) \(expression uint u2u \(expression uint16_t \* \(expression uint16_t u2ump \(var_ref y'),
     Test("usubBorrow",
          """
          #version 310 es
@@ -1319,7 +1318,7 @@ TESTS = [
                  color *= borrow;
          }
          """,
-         r'expression uint \+ \(var_ref x\) \(expression uint neg'),
+         r'expression uint \- \(expression uint u2u \(expression uint16_t \* \(expression uint16_t u2ump \(var_ref x\) \) \(constant uint16_t \(2\)\) \) \) \(expression uint u2u \(expression uint16_t \* \(expression uint16_t u2ump \(var_ref y'),
     Test("imulExtended",
          """
          #version 310 es
@@ -1685,7 +1684,7 @@ TESTS = [
                     color += x;
          }
          """,
-         r'\(assign  \(x\) \(var_ref x\)  \(expression float16_t \+ \(var_ref x\) \(expression float16_t f2fmp \(var_ref incr'),
+         r'\(assign  \(x\) \(var_ref x\)  \(expression float16_t \+ \(var_ref x\) \(var_ref incr'),
     Test("i32 loop counter",
          """
          #version 310 es

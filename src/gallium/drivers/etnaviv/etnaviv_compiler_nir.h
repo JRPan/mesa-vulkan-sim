@@ -215,7 +215,8 @@ dest_for_instr(nir_instr *instr)
       if (intr->intrinsic == nir_intrinsic_load_uniform ||
           intr->intrinsic == nir_intrinsic_load_ubo ||
           intr->intrinsic == nir_intrinsic_load_input ||
-          intr->intrinsic == nir_intrinsic_load_instance_id)
+          intr->intrinsic == nir_intrinsic_load_instance_id ||
+          intr->intrinsic == nir_intrinsic_load_texture_rect_scaling)
          dest = &intr->dest;
    } break;
    case nir_instr_type_deref:
@@ -341,7 +342,7 @@ etna_emit_alu(struct etna_compile *c, nir_op op, struct etna_inst_dst dst,
 void
 etna_emit_tex(struct etna_compile *c, nir_texop op, unsigned texid, unsigned dst_swiz,
               struct etna_inst_dst dst, struct etna_inst_src coord,
-              struct etna_inst_src lod_bias, struct etna_inst_src compare);
+              struct etna_inst_src src1, struct etna_inst_src src2);
 
 void
 etna_emit_jump(struct etna_compile *c, unsigned block, struct etna_inst_src condition);

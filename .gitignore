@@ -1,6 +1,8 @@
+.vscode*
 *.pyc
 *.pyo
 *.out
 build
 .vscode
 lib
+/build

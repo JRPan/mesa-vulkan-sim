@@ -158,7 +158,7 @@ lookup_shader(struct st_context *st,
 }
 
 
-static void
+void
 st_DrawTex(struct gl_context *ctx, GLfloat x, GLfloat y, GLfloat z,
            GLfloat width, GLfloat height)
 {
@@ -176,7 +176,7 @@ st_DrawTex(struct gl_context *ctx, GLfloat x, GLfloat y, GLfloat z,
    st_flush_bitmap_cache(st);
    st_invalidate_readpix_cache(st);
 
-   st_validate_state(st, ST_PIPELINE_META);
+   st_validate_state(st, ST_PIPELINE_META_STATE_MASK);
 
    /* determine if we need vertex color */
    if (ctx->FragmentProgram._Current->info.inputs_read & VARYING_BIT_COL0)
@@ -311,6 +311,7 @@ st_DrawTex(struct gl_context *ctx, GLfloat x, GLfloat y, GLfloat z,
       velems.velems[i].instance_divisor = 0;
       velems.velems[i].vertex_buffer_index = 0;
       velems.velems[i].src_format = PIPE_FORMAT_R32G32B32A32_FLOAT;
+      velems.velems[i].dual_slot = false;
    }
    velems.count = numAttribs;
 
@@ -320,7 +321,7 @@ st_DrawTex(struct gl_context *ctx, GLfloat x, GLfloat y, GLfloat z,
    /* viewport state: viewport matching window dims */
    {
       const struct gl_framebuffer *fb = ctx->DrawBuffer;
-      const GLboolean invert = (st_fb_orientation(fb) == Y_0_TOP);
+      const GLboolean invert = (_mesa_fb_orientation(fb) == Y_0_TOP);
       const GLfloat width = (GLfloat)_mesa_geometric_width(fb);
       const GLfloat height = (GLfloat)_mesa_geometric_height(fb);
       struct pipe_viewport_state vp;
@@ -330,6 +331,10 @@ st_DrawTex(struct gl_context *ctx, GLfloat x, GLfloat y, GLfloat z,
       vp.translate[0] = 0.5f * width;
       vp.translate[1] = 0.5f * height;
       vp.translate[2] = 0.0f;
+      vp.swizzle_x = PIPE_VIEWPORT_SWIZZLE_POSITIVE_X;
+      vp.swizzle_y = PIPE_VIEWPORT_SWIZZLE_POSITIVE_Y;
+      vp.swizzle_z = PIPE_VIEWPORT_SWIZZLE_POSITIVE_Z;
+      vp.swizzle_w = PIPE_VIEWPORT_SWIZZLE_POSITIVE_W;
       cso_set_viewport(cso, &vp);
    }
 
@@ -343,17 +348,10 @@ st_DrawTex(struct gl_context *ctx, GLfloat x, GLfloat y, GLfloat z,
    pipe_resource_reference(&vbuffer, NULL);
 
    /* restore state */
-   cso_restore_state(cso);
-   st->dirty |= ST_NEW_VERTEX_ARRAYS;
+   cso_restore_state(cso, 0);
+   ctx->Array.NewVertexElements = true;
+   ctx->NewDriverState |= ST_NEW_VERTEX_ARRAYS;
 }
-
-
-void
-st_init_drawtex_functions(struct dd_function_table *functions)
-{
-   functions->DrawTex = st_DrawTex;
-}
-
 
 /**
  * Free any cached shaders

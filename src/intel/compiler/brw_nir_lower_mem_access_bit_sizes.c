@@ -26,11 +26,10 @@
 #include "util/u_math.h"
 #include "util/bitscan.h"
 
-static nir_ssa_def *
+static nir_intrinsic_instr *
 dup_mem_intrinsic(nir_builder *b, nir_intrinsic_instr *intrin,
                   nir_ssa_def *store_src, int offset,
-                  unsigned num_components, unsigned bit_size,
-                  unsigned align)
+                  unsigned num_components, unsigned bit_size)
 {
    const nir_intrinsic_info *info = &nir_intrinsic_infos[intrin->intrinsic];
 
@@ -60,25 +59,30 @@ dup_mem_intrinsic(nir_builder *b, nir_intrinsic_instr *intrin,
    for (unsigned i = 0; i < info->num_indices; i++)
       dup->const_index[i] = intrin->const_index[i];
 
-   nir_intrinsic_set_align(dup, align, 0);
+   if (nir_intrinsic_has_access(intrin))
+      nir_intrinsic_set_access(dup, nir_intrinsic_access(intrin));
+
+   const unsigned align_mul = nir_intrinsic_align_mul(intrin);
+   const unsigned align_offset =
+      (nir_intrinsic_align_offset(intrin) + (unsigned)offset) % align_mul;
+   nir_intrinsic_set_align_offset(dup, align_offset);
 
    if (info->has_dest) {
       assert(intrin->dest.is_ssa);
       nir_ssa_dest_init(&dup->instr, &dup->dest,
-                        num_components, bit_size,
-                        intrin->dest.ssa.name);
+                        num_components, bit_size, NULL);
    } else {
       nir_intrinsic_set_write_mask(dup, (1 << num_components) - 1);
    }
 
    nir_builder_instr_insert(b, &dup->instr);
 
-   return info->has_dest ? &dup->dest.ssa : NULL;
+   return dup;
 }
 
 static bool
 lower_mem_load_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
-                        const struct gen_device_info *devinfo)
+                        const struct intel_device_info *devinfo)
 {
    const bool needs_scalar =
       intrin->intrinsic == nir_intrinsic_load_scratch;
@@ -87,6 +91,8 @@ lower_mem_load_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
    const unsigned bit_size = intrin->dest.ssa.bit_size;
    const unsigned num_components = intrin->dest.ssa.num_components;
    const unsigned bytes_read = num_components * (bit_size / 8);
+   const unsigned align_mul = nir_intrinsic_align_mul(intrin);
+   const unsigned align_offset = nir_intrinsic_align_offset(intrin);
    const unsigned align = nir_intrinsic_align(intrin);
 
    if (bit_size == 32 && align >= 32 && intrin->num_components <= 4 &&
@@ -107,10 +113,37 @@ lower_mem_load_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
        */
       assert(load_comps32 <= 3);
 
-      nir_ssa_def *load = dup_mem_intrinsic(b, intrin, NULL, -load_offset,
-                                            load_comps32, 32, 4);
+      nir_intrinsic_instr *load_instr =
+            dup_mem_intrinsic(b, intrin, NULL, -load_offset, load_comps32, 32);
+      nir_ssa_def *load = &load_instr->dest.ssa;
       result = nir_extract_bits(b, &load, 1, load_offset * 8,
                                 num_components, bit_size);
+   } else if (bit_size < 32 && intrin->intrinsic == nir_intrinsic_load_task_payload) {
+      /* In task shaders we lower task payload stores & loads to shared memory,
+       * so this code should be used only for mesh shaders.
+       */
+      assert(b->shader->info.stage == MESA_SHADER_MESH);
+      nir_ssa_def *unaligned_offset = nir_ssa_for_src(b, intrin->src[0], 1);
+
+      /* offset aligned to dword */
+      nir_ssa_def *aligned_offset = nir_iand_imm(b, unaligned_offset, ~0x3u);
+
+      /* offset from last dword */
+      nir_ssa_def *dword_offset = nir_iand_imm(b, unaligned_offset, 0x3u);
+
+      nir_intrinsic_instr *new_load_instr =
+            dup_mem_intrinsic(b, intrin, NULL, 0, 1, 32);
+
+      nir_ssa_def *new_load = &new_load_instr->dest.ssa;
+
+      nir_instr_rewrite_src_ssa(&new_load_instr->instr,
+                                &new_load_instr->src[0],
+                                aligned_offset);
+
+      /* extract bit_size bits starting from dword_offset * 8 */
+      result = nir_iand_imm(b, nir_ishr(b, new_load,
+                                           nir_imul_imm(b, dword_offset, 8)),
+                               (1u << bit_size) - 1);
    } else {
       /* Otherwise, we have to break it into smaller loads.  We could end up
        * with as many as 32 loads if we're loading a u64vec16 from scratch.
@@ -122,9 +155,24 @@ lower_mem_load_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
          const unsigned bytes_left = bytes_read - load_offset;
          unsigned load_bit_size, load_comps;
          if (align < 4) {
-            load_comps = 1;
             /* Choose a byte, word, or dword */
-            load_bit_size = util_next_power_of_two(MIN2(bytes_left, 4)) * 8;
+            unsigned load_bytes = util_next_power_of_two(MIN2(bytes_left, 4));
+
+            if (intrin->intrinsic == nir_intrinsic_load_scratch) {
+               /* The way scratch address swizzling works in the back-end, it
+                * happens at a DWORD granularity so we can't have a single load
+                * or store cross a DWORD boundary.
+                */
+               if ((align_offset % 4) + load_bytes > MIN2(align_mul, 4))
+                  load_bytes = MIN2(align_mul, 4) - (align_offset % 4);
+            }
+
+            /* Must be a power of two */
+            if (load_bytes == 3)
+               load_bytes = 2;
+
+            load_bit_size = load_bytes * 8;
+            load_comps = 1;
          } else {
             assert(load_offset % 4 == 0);
             load_bit_size = 32;
@@ -132,9 +180,10 @@ lower_mem_load_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
                          DIV_ROUND_UP(MIN2(bytes_left, 16), 4);
          }
 
-         loads[num_loads++] = dup_mem_intrinsic(b, intrin, NULL, load_offset,
-                                                load_comps, load_bit_size,
-                                                align);
+         nir_intrinsic_instr *load_instr =
+               dup_mem_intrinsic(b, intrin, NULL, load_offset, load_comps,
+                                 load_bit_size);
+         loads[num_loads++] = &load_instr->dest.ssa;
 
          load_offset += load_comps * (load_bit_size / 8);
       }
@@ -144,7 +193,7 @@ lower_mem_load_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
    }
 
    nir_ssa_def_rewrite_uses(&intrin->dest.ssa,
-                            nir_src_for_ssa(result));
+                            result);
    nir_instr_remove(&intrin->instr);
 
    return true;
@@ -152,7 +201,7 @@ lower_mem_load_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
 
 static bool
 lower_mem_store_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
-                         const struct gen_device_info *devinfo)
+                         const struct intel_device_info *devinfo)
 {
    const bool needs_scalar =
       intrin->intrinsic == nir_intrinsic_store_scratch;
@@ -190,7 +239,7 @@ lower_mem_store_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
 
    for (unsigned i = 0; i < num_components; i++) {
       if (writemask & (1u << i))
-         BITSET_SET_RANGE(mask, i * byte_size, ((i + 1) * byte_size) - 1);
+         BITSET_SET_RANGE_INSIDE_WORD(mask, i * byte_size, ((i + 1) * byte_size) - 1);
    }
 
    while (BITSET_FFS(mask) != 0) {
@@ -208,18 +257,28 @@ lower_mem_store_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
          (align_mul >= 4 && (align_offset + start) % 4 == 0) ||
          (offset_is_const && (start + const_offset) % 4 == 0);
 
-      unsigned store_comps, store_bit_size, store_align;
+      unsigned store_comps, store_bit_size;
       if (chunk_bytes >= 4 && is_dword_aligned) {
-         store_align = MAX2(align, 4);
          store_bit_size = 32;
          store_comps = needs_scalar ? 1 : MIN2(chunk_bytes, 16) / 4;
       } else {
-         store_align = align;
+         unsigned store_bytes = MIN2(chunk_bytes, 4);
+
+         if (intrin->intrinsic == nir_intrinsic_store_scratch) {
+            /* The way scratch address swizzling works in the back-end, it
+             * happens at a DWORD granularity so we can't have a single load
+             * or store cross a DWORD boundary.
+             */
+            if ((align_offset % 4) + store_bytes > MIN2(align_mul, 4))
+               store_bytes = MIN2(align_mul, 4) - (align_offset % 4);
+         }
+
+         /* Must be a power of two */
+         if (store_bytes == 3)
+            store_bytes = 2;
+
+         store_bit_size = store_bytes * 8;
          store_comps = 1;
-         store_bit_size = MIN2(chunk_bytes, 4) * 8;
-         /* The bit size must be a power of two */
-         if (store_bit_size == 24)
-            store_bit_size = 16;
       }
       const unsigned store_bytes = store_comps * (store_bit_size / 8);
 
@@ -227,7 +286,7 @@ lower_mem_store_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
                                              store_comps, store_bit_size);
 
       dup_mem_intrinsic(b, intrin, packed, start,
-                        store_comps, store_bit_size, store_align);
+                        store_comps, store_bit_size);
 
       BITSET_CLEAR_RANGE(mask, start, (start + store_bytes - 1));
    }
@@ -238,54 +297,37 @@ lower_mem_store_bit_size(nir_builder *b, nir_intrinsic_instr *intrin,
 }
 
 static bool
-lower_mem_access_bit_sizes_impl(nir_function_impl *impl,
-                                const struct gen_device_info *devinfo)
+lower_mem_access_bit_sizes_instr(nir_builder *b,
+                                nir_instr *instr,
+                                void *cb_data)
 {
-   bool progress = false;
+   const struct intel_device_info *devinfo = cb_data;
 
-   nir_builder b;
-   nir_builder_init(&b, impl);
+   if (instr->type != nir_instr_type_intrinsic)
+      return false;
 
-   nir_foreach_block(block, impl) {
-      nir_foreach_instr_safe(instr, block) {
-         if (instr->type != nir_instr_type_intrinsic)
-            continue;
+   b->cursor = nir_after_instr(instr);
 
-         b.cursor = nir_after_instr(instr);
+   nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
+   switch (intrin->intrinsic) {
+   case nir_intrinsic_load_global:
+   case nir_intrinsic_load_global_constant:
+   case nir_intrinsic_load_ssbo:
+   case nir_intrinsic_load_shared:
+   case nir_intrinsic_load_scratch:
+   case nir_intrinsic_load_task_payload:
+      return lower_mem_load_bit_size(b, intrin, devinfo);
 
-         nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
-         switch (intrin->intrinsic) {
-         case nir_intrinsic_load_global:
-         case nir_intrinsic_load_global_constant:
-         case nir_intrinsic_load_ssbo:
-         case nir_intrinsic_load_shared:
-         case nir_intrinsic_load_scratch:
-            if (lower_mem_load_bit_size(&b, intrin, devinfo))
-               progress = true;
-            break;
+   case nir_intrinsic_store_global:
+   case nir_intrinsic_store_ssbo:
+   case nir_intrinsic_store_shared:
+   case nir_intrinsic_store_scratch:
+   case nir_intrinsic_store_task_payload:
+      return lower_mem_store_bit_size(b, intrin, devinfo);
 
-         case nir_intrinsic_store_global:
-         case nir_intrinsic_store_ssbo:
-         case nir_intrinsic_store_shared:
-         case nir_intrinsic_store_scratch:
-            if (lower_mem_store_bit_size(&b, intrin, devinfo))
-               progress = true;
-            break;
-
-         default:
-            break;
-         }
-      }
+   default:
+      return false;
    }
-
-   if (progress) {
-      nir_metadata_preserve(impl, nir_metadata_block_index |
-                                  nir_metadata_dominance);
-   } else {
-      nir_metadata_preserve(impl, nir_metadata_all);
-   }
-
-   return progress;
 }
 
 /**
@@ -312,14 +354,10 @@ lower_mem_access_bit_sizes_impl(nir_function_impl *impl,
  */
 bool
 brw_nir_lower_mem_access_bit_sizes(nir_shader *shader,
-                                   const struct gen_device_info *devinfo)
+                                   const struct intel_device_info *devinfo)
 {
-   bool progress = false;
-
-   nir_foreach_function(func, shader) {
-      if (func->impl && lower_mem_access_bit_sizes_impl(func->impl, devinfo))
-         progress = true;
-   }
-
-   return progress;
+   return nir_shader_instructions_pass(shader, lower_mem_access_bit_sizes_instr,
+                                       nir_metadata_block_index |
+                                       nir_metadata_dominance,
+                                       (void *)devinfo);
 }

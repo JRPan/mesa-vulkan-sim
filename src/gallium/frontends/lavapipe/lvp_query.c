@@ -24,7 +24,7 @@
 #include "lvp_private.h"
 #include "pipe/p_context.h"
 
-VkResult lvp_CreateQueryPool(
+VKAPI_ATTR VkResult VKAPI_CALL lvp_CreateQueryPool(
     VkDevice                                    _device,
     const VkQueryPoolCreateInfo*                pCreateInfo,
     const VkAllocationCallbacks*                pAllocator,
@@ -46,6 +46,9 @@ VkResult lvp_CreateQueryPool(
    case VK_QUERY_TYPE_PIPELINE_STATISTICS:
       pipeq = PIPE_QUERY_PIPELINE_STATISTICS;
       break;
+   case VK_QUERY_TYPE_PRIMITIVES_GENERATED_EXT:
+      pipeq = PIPE_QUERY_PRIMITIVES_GENERATED;
+      break;
    default:
       return VK_ERROR_FEATURE_NOT_PRESENT;
    }
@@ -56,7 +59,7 @@ VkResult lvp_CreateQueryPool(
                     pool_size, 8,
                     VK_SYSTEM_ALLOCATION_SCOPE_OBJECT);
    if (!pool)
-      return vk_error(device->instance, VK_ERROR_OUT_OF_HOST_MEMORY);
+      return vk_error(device, VK_ERROR_OUT_OF_HOST_MEMORY);
 
    vk_object_base_init(&device->vk, &pool->base,
                        VK_OBJECT_TYPE_QUERY_POOL);
@@ -69,7 +72,7 @@ VkResult lvp_CreateQueryPool(
    return VK_SUCCESS;
 }
 
-void lvp_DestroyQueryPool(
+VKAPI_ATTR void VKAPI_CALL lvp_DestroyQueryPool(
     VkDevice                                    _device,
     VkQueryPool                                 _pool,
     const VkAllocationCallbacks*                pAllocator)
@@ -87,7 +90,7 @@ void lvp_DestroyQueryPool(
    vk_free2(&device->vk.alloc, pAllocator, pool);
 }
 
-VkResult lvp_GetQueryPoolResults(
+VKAPI_ATTR VkResult VKAPI_CALL lvp_GetQueryPoolResults(
    VkDevice                                    _device,
    VkQueryPool                                 queryPool,
    uint32_t                                    firstQuery,
@@ -101,7 +104,7 @@ VkResult lvp_GetQueryPoolResults(
    LVP_FROM_HANDLE(lvp_query_pool, pool, queryPool);
    VkResult vk_result = VK_SUCCESS;
 
-   lvp_DeviceWaitIdle(_device);
+   device->vk.dispatch_table.DeviceWaitIdle(_device);
 
    for (unsigned i = firstQuery; i < firstQuery + queryCount; i++) {
       uint8_t *dptr = (uint8_t *)((char *)pData + (stride * (i - firstQuery)));
@@ -138,8 +141,12 @@ VkResult lvp_GetQueryPoolResults(
                *(uint64_t *)dptr = result.u64;
                dptr += 8;
             }
-         } else
-            dptr += stride;
+         } else {
+            if (pool->type == VK_QUERY_TYPE_TRANSFORM_FEEDBACK_STREAM_EXT)
+               dptr += 16;
+            else
+               dptr += 8;
+         }
 
       } else {
          if (ready || (flags & VK_QUERY_RESULT_PARTIAL_BIT)) {
@@ -174,7 +181,10 @@ VkResult lvp_GetQueryPoolResults(
                dptr += 4;
             }
          } else
-            dptr += stride;
+            if (pool->type == VK_QUERY_TYPE_TRANSFORM_FEEDBACK_STREAM_EXT)
+               dptr += 8;
+            else
+               dptr += 4;
       }
 
       if (flags & VK_QUERY_RESULT_WITH_AVAILABILITY_BIT) {
@@ -185,4 +195,23 @@ VkResult lvp_GetQueryPoolResults(
       }
    }
    return vk_result;
+}
+
+VKAPI_ATTR void VKAPI_CALL lvp_ResetQueryPool(
+   VkDevice                                    _device,
+   VkQueryPool                                 queryPool,
+   uint32_t                                    firstQuery,
+   uint32_t                                    queryCount)
+{
+   LVP_FROM_HANDLE(lvp_device, device, _device);
+   LVP_FROM_HANDLE(lvp_query_pool, pool, queryPool);
+
+   for (uint32_t i = 0; i < queryCount; i++) {
+      uint32_t idx = i + firstQuery;
+
+      if (pool->queries[idx]) {
+         device->queue.ctx->destroy_query(device->queue.ctx, pool->queries[idx]);
+         pool->queries[idx] = NULL;
+      }
+   }
 }

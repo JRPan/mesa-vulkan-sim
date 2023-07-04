@@ -62,6 +62,7 @@ NineVertexShader9_ctor( struct NineVertexShader9 *This,
     info.const_i_base = NINE_CONST_I_BASE(device->max_vs_const_f) / 16;
     info.const_b_base = NINE_CONST_B_BASE(device->max_vs_const_f) / 16;
     info.sampler_mask_shadow = 0x0;
+    info.fetch4 = 0x0;
     info.sampler_ps1xtypes = 0x0;
     info.fog_enable = 0;
     info.point_size_min = 0;
@@ -133,8 +134,13 @@ NineVertexShader9_dtor( struct NineVertexShader9 *This )
 
         do {
             if (var->cso) {
-                if (This->base.device->context.cso_shader.vs == var->cso)
+                if (This->base.device->context.cso_shader.vs == var->cso) {
+                    /* unbind because it is illegal to delete something bound */
                     pipe->bind_vs_state(pipe, NULL);
+                    /* This will rebind cso_shader.vs in case somehow actually
+                     * an identical shader with same cso is bound */
+                    This->base.device->context.commit |= NINE_STATE_COMMIT_VS;
+                }
                 pipe->delete_vs_state(pipe, var->cso);
                 FREE(var->const_ranges);
             }
@@ -149,8 +155,10 @@ NineVertexShader9_dtor( struct NineVertexShader9 *This )
         }
 
         if (This->ff_cso) {
-            if (This->ff_cso == This->base.device->context.cso_shader.vs)
+            if (This->ff_cso == This->base.device->context.cso_shader.vs) {
                 pipe->bind_vs_state(pipe, NULL);
+                This->base.device->context.commit |= NINE_STATE_COMMIT_VS;
+            }
             pipe->delete_vs_state(pipe, This->ff_cso);
         }
     }
@@ -214,6 +222,7 @@ NineVertexShader9_GetVariant( struct NineVertexShader9 *This,
         info.const_b_base = NINE_CONST_B_BASE(device->max_vs_const_f) / 16;
         info.byte_code = This->byte_code.tokens;
         info.sampler_mask_shadow = key & 0xf;
+        info.fetch4 = 0x0;
         info.fog_enable = device->context.rs[D3DRS_FOGENABLE];
         info.point_size_min = asfloat(device->context.rs[D3DRS_POINTSIZE_MIN]);
         info.point_size_max = asfloat(device->context.rs[D3DRS_POINTSIZE_MAX]);
@@ -260,6 +269,7 @@ NineVertexShader9_GetVariantProcessVertices( struct NineVertexShader9 *This,
     info.const_b_base = 0;
     info.byte_code = This->byte_code.tokens;
     info.sampler_mask_shadow = 0;
+    info.fetch4 = 0x0;
     info.fog_enable = false;
     info.point_size_min = 0;
     info.point_size_max = 0;

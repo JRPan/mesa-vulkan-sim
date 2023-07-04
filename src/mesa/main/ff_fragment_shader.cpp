@@ -27,7 +27,7 @@
  *
  **************************************************************************/
 
-#include "main/glheader.h"
+#include "util/glheader.h"
 #include "main/context.h"
 
 #include "main/macros.h"
@@ -42,7 +42,7 @@
 #include "compiler/glsl/glsl_parser_extras.h"
 #include "compiler/glsl/glsl_symbol_table.h"
 #include "compiler/glsl_types.h"
-#include "program/ir_to_mesa.h"
+#include "program/link_program.h"
 #include "program/program.h"
 #include "program/programopt.h"
 #include "program/prog_cache.h"
@@ -179,9 +179,8 @@ static GLbitfield filter_fp_input_mask( GLbitfield fp_inputs,
       /* Fixed function vertex logic */
       GLbitfield possible_inputs = 0;
 
-      /* _NEW_VARYING_VP_INPUTS */
-      GLbitfield varying_inputs = ctx->varying_vp_inputs;
-      /* We only update ctx->varying_vp_inputs when in VP_MODE_FF _VPMode */
+      GLbitfield varying_inputs = ctx->VertexProgram._VaryingInputs;
+      /* We only update ctx->VertexProgram._VaryingInputs when in VP_MODE_FF _VPMode */
       assert(VP_MODE_FF == ctx->VertexProgram._VPMode);
 
       /* These get generated in the setup routine regardless of the
@@ -193,7 +192,6 @@ static GLbitfield filter_fp_input_mask( GLbitfield fp_inputs,
          possible_inputs = VARYING_BITS_TEX_ANY;
       }
       else {
-         /* _NEW_TEXTURE_STATE */
          const GLbitfield possible_tex_inputs =
                ctx->Texture._TexGenEnabled |
                ctx->Texture._TexMatEnabled |
@@ -205,7 +203,6 @@ static GLbitfield filter_fp_input_mask( GLbitfield fp_inputs,
       /* First look at what values may be computed by the generated
        * vertex program:
        */
-      /* _NEW_LIGHT */
       if (ctx->Light.Enabled) {
          possible_inputs |= VARYING_BIT_COL0;
 
@@ -267,7 +264,7 @@ static GLuint make_state_key( struct gl_context *ctx,  struct state_key *key )
 
    memset(key, 0, sizeof(*key));
 
-   /* _NEW_TEXTURE_OBJECT */
+   /* _NEW_TEXTURE_OBJECT | _NEW_TEXTURE_STATE */
    mask = ctx->Texture._EnabledCoordUnits;
    int i = -1;
    while (mask) {
@@ -305,7 +302,7 @@ static GLuint make_state_key( struct gl_context *ctx,  struct state_key *key )
 
    key->nr_enabled_units = i + 1;
 
-   /* _NEW_LIGHT | _NEW_FOG */
+   /* _NEW_FOG */
    if (texenv_doing_secondary_color(ctx)) {
       key->separate_specular = 1;
       inputs_referenced |= VARYING_BIT_COL1;
@@ -345,13 +342,6 @@ public:
    ir_variable *src_texture[MAX_TEXTURE_COORD_UNITS];
    /* Reg containing each texture unit's sampled texture color,
     * else undef.
-    */
-
-   /* Texcoord override from bumpmapping. */
-   ir_variable *texcoord_tex[MAX_TEXTURE_COORD_UNITS];
-
-   /* Reg containing texcoord for a texture unit,
-    * needed for bump mapping, else undef.
     */
 
    ir_rvalue *src_previous;	/**< Reg containing color from previous
@@ -734,8 +724,6 @@ static void load_texture( texenv_fragment_program *p, GLuint unit )
 
    if (!(p->state->inputs_available & (VARYING_BIT_TEX0 << unit))) {
       texcoord = get_current_attrib(p, VERT_ATTRIB_TEX0 + unit);
-   } else if (p->texcoord_tex[unit]) {
-      texcoord = new(p->mem_ctx) ir_dereference_variable(p->texcoord_tex[unit]);
    } else {
       ir_variable *tc_array = p->shader->symbols->get_variable("gl_TexCoord");
       assert(tc_array);
@@ -1049,9 +1037,6 @@ create_new_program(struct gl_context *ctx, struct state_key *key)
 
    p.mem_ctx = ralloc_context(NULL);
    p.shader = _mesa_new_shader(0, MESA_SHADER_FRAGMENT);
-#ifdef DEBUG
-   p.shader->SourceChecksum = 0xf18ed; /* fixed */
-#endif
    p.shader->ir = new(p.shader) exec_list;
    state = new(p.shader) _mesa_glsl_parse_state(ctx, MESA_SHADER_FRAGMENT,
 						p.shader);
@@ -1088,10 +1073,8 @@ create_new_program(struct gl_context *ctx, struct state_key *key)
    _mesa_glsl_initialize_types(state);
    _mesa_glsl_initialize_variables(p.instructions, state);
 
-   for (unit = 0; unit < ctx->Const.MaxTextureUnits; unit++) {
+   for (unit = 0; unit < ctx->Const.MaxTextureUnits; unit++)
       p.src_texture[unit] = NULL;
-      p.texcoord_tex[unit] = NULL;
-   }
 
    p.src_previous = NULL;
 
@@ -1109,16 +1092,6 @@ create_new_program(struct gl_context *ctx, struct state_key *key)
       emit_instructions(&p);
 
    validate_ir_tree(p.shader->ir);
-
-   const struct gl_shader_compiler_options *options =
-      &ctx->Const.ShaderCompilerOptions[MESA_SHADER_FRAGMENT];
-
-   /* Conservative approach: Don't optimize here, the linker does it too. */
-   if (!ctx->Const.GLSLOptimizeConservatively) {
-      while (do_common_optimization(p.shader->ir, false, false, options,
-                                    ctx->Const.NativeIntegers))
-         ;
-   }
 
    reparent_ir(p.shader->ir, p.shader->ir);
 

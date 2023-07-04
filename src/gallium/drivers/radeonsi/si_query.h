@@ -27,6 +27,8 @@
 
 #include "util/u_threaded_context.h"
 
+#include "ac_perfcounter.h"
+
 struct pipe_context;
 struct pipe_query;
 struct pipe_resource;
@@ -64,6 +66,8 @@ enum
    SI_QUERY_REQUESTED_GTT,
    SI_QUERY_MAPPED_VRAM,
    SI_QUERY_MAPPED_GTT,
+   SI_QUERY_SLAB_WASTED_VRAM,
+   SI_QUERY_SLAB_WASTED_GTT,
    SI_QUERY_BUFFER_WAIT_TIME,
    SI_QUERY_NUM_MAPPED_BUFFERS,
    SI_QUERY_NUM_GFX_IBS,
@@ -107,9 +111,6 @@ enum
    SI_QUERY_GPIN_NUM_RB,
    SI_QUERY_GPIN_NUM_SPI,
    SI_QUERY_GPIN_NUM_SE,
-   SI_QUERY_PD_NUM_PRIMS_ACCEPTED,
-   SI_QUERY_PD_NUM_PRIMS_REJECTED,
-   SI_QUERY_PD_NUM_PRIMS_INELIGIBLE,
    SI_QUERY_LIVE_SHADER_CACHE_HITS,
    SI_QUERY_LIVE_SHADER_CACHE_MISSES,
    SI_QUERY_MEMORY_SHADER_CACHE_HITS,
@@ -132,7 +133,8 @@ struct si_query_ops {
    bool (*end)(struct si_context *, struct si_query *);
    bool (*get_result)(struct si_context *, struct si_query *, bool wait,
                       union pipe_query_result *result);
-   void (*get_result_resource)(struct si_context *, struct si_query *, bool wait,
+   void (*get_result_resource)(struct si_context *, struct si_query *,
+                               enum pipe_query_flags flags,
                                enum pipe_query_value_type result_type, int index,
                                struct pipe_resource *resource, unsigned offset);
 
@@ -160,6 +162,10 @@ enum
    /* gap */
    /* whether begin_query doesn't clear the result */
    SI_QUERY_HW_FLAG_BEGIN_RESUMES = (1 << 2),
+   /* whether GS invocations and emitted primitives counters are emulated
+    * using atomic adds.
+    */
+   SI_QUERY_EMULATE_GS_COUNTERS = (1 << 3),
 };
 
 struct si_query_hw_ops {
@@ -201,14 +207,20 @@ struct si_query_hw {
    /* Size of the result in memory for both begin_query and end_query,
     * this can be one or two numbers, or it could even be a size of a structure. */
    unsigned result_size;
-   /* For transform feedback: which stream the query is for */
-   unsigned stream;
+   union {
+      /* For transform feedback: which stream the query is for */
+      unsigned stream;
+      /* For pipeline stats: which counter is active */
+      unsigned index;
+   };
 
    /* Workaround via compute shader */
    struct si_resource *workaround_buf;
    unsigned workaround_offset;
 };
 
+unsigned si_query_pipestat_end_dw_offset(struct si_screen *sscreen,
+                                         enum pipe_statistics_query_index index);
 void si_query_hw_destroy(struct si_context *sctx, struct si_query *squery);
 bool si_query_hw_begin(struct si_context *sctx, struct si_query *squery);
 bool si_query_hw_end(struct si_context *sctx, struct si_query *squery);
@@ -270,15 +282,10 @@ struct pipe_query *gfx10_sh_query_create(struct si_screen *screen, enum pipe_que
 
 /* Performance counters */
 struct si_perfcounters {
-   unsigned num_groups;
-   unsigned num_blocks;
-   struct si_pc_block *blocks;
+   struct ac_perfcounters base;
 
    unsigned num_stop_cs_dwords;
    unsigned num_instance_cs_dwords;
-
-   bool separate_se;
-   bool separate_instance;
 };
 
 struct pipe_query *si_create_batch_query(struct pipe_context *ctx, unsigned num_queries,
@@ -290,10 +297,7 @@ int si_get_perfcounter_group_info(struct si_screen *, unsigned index,
                                   struct pipe_driver_query_group_info *info);
 
 struct si_qbo_state {
-   void *saved_compute;
    struct pipe_constant_buffer saved_const0;
-   struct pipe_shader_buffer saved_ssbo[3];
-   unsigned saved_ssbo_writable_mask;
 };
 
 #endif /* SI_QUERY_H */

@@ -101,7 +101,6 @@ static const struct loader_dri3_vtable egl_dri3_vtable = {
    .get_dri_context = egl_dri3_get_dri_context,
    .get_dri_screen = egl_dri3_get_dri_screen,
    .flush_drawable = egl_dri3_flush_drawable,
-   .show_fps = NULL,
 };
 
 static EGLBoolean
@@ -131,6 +130,21 @@ dri3_set_swap_interval(_EGLDisplay *disp, _EGLSurface *surf, EGLint interval)
    loader_dri3_set_swap_interval(&dri3_surf->loader_drawable, interval);
 
    return EGL_TRUE;
+}
+
+static enum loader_dri3_drawable_type
+egl_to_loader_dri3_drawable_type(EGLint type)
+{
+   switch (type) {
+   case EGL_WINDOW_BIT:
+      return LOADER_DRI3_DRAWABLE_WINDOW;
+   case EGL_PIXMAP_BIT:
+      return LOADER_DRI3_DRAWABLE_PIXMAP;
+   case EGL_PBUFFER_BIT:
+      return LOADER_DRI3_DRAWABLE_PBUFFER;
+   default:
+      return LOADER_DRI3_DRAWABLE_UNKNOWN;
+   }
 }
 
 static _EGLSurface *
@@ -172,9 +186,11 @@ dri3_create_surface(_EGLDisplay *disp, EGLint type, _EGLConfig *conf,
    }
 
    if (loader_dri3_drawable_init(dri2_dpy->conn, drawable,
+                                 egl_to_loader_dri3_drawable_type(type),
                                  dri2_dpy->dri_screen,
                                  dri2_dpy->is_different_gpu,
                                  dri2_dpy->multibuffers_available,
+                                 true,
                                  dri_config,
                                  &dri2_dpy->loader_dri3_ext,
                                  &egl_dri3_vtable,
@@ -410,7 +426,7 @@ dri3_flush_front_buffer(__DRIdrawable *driDrawable, void *loaderPrivate)
     * support front-buffer rendering or not:
     * http://lists.freedesktop.org/archives/mesa-dev/2013-June/040129.html
     */
-   if (!draw->is_pixmap)
+   if (draw->type == LOADER_DRI3_DRAWABLE_WINDOW)
       _eglLog(_EGL_WARNING, "FIXME: egl/x11 doesn't support front buffer rendering.");
 }
 
@@ -510,6 +526,7 @@ struct dri2_egl_display_vtbl dri3_x11_display_vtbl = {
    .query_buffer_age = dri3_query_buffer_age,
    .query_surface = dri3_query_surface,
    .get_sync_values = dri3_get_sync_values,
+   .get_msc_rate = dri2_x11_get_msc_rate,
    .get_dri_drawable = dri3_get_dri_drawable,
    .close_screen_notify = dri3_close_screen_notify,
 };

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # encoding=utf-8
 # Copyright © 2017 Intel Corporation
 
@@ -20,12 +20,16 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-from __future__ import print_function
+import argparse
 import os
 
 
 def main():
-    filename = os.path.join(os.environ['MESON_SOURCE_ROOT'], 'VERSION')
+    parser = argparse.ArgumentParser()
+    parser.add_argument('version_dir', help="Directory with VERSION file")
+    args = parser.parse_args()
+
+    filename = os.path.join(args.version_dir, 'VERSION')
     with open(filename) as f:
         version = f.read().strip()
     print(version, end='')

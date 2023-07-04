@@ -28,7 +28,7 @@ if with_platform_x11 and with_dri3
     include_directories : [inc_include, inc_src],
     dependencies : [
       dep_libdrm, dep_xcb_dri3, dep_xcb_present, dep_xcb_sync, dep_xshmfence,
-      dep_xcb_xfixes,
+      dep_xcb_xfixes, dep_xcb_xrandr,
     ],
     build_by_default : false,
   )
@@ -40,14 +40,9 @@ loader_c_args = [
   '-DUSE_DRICONF',
   '-DDEFAULT_DRIVER_DIR="@0@"'.format(dri_search_path),
 ]
-
-if with_gallium_iris and get_option('prefer-iris')
-  loader_c_args += ['-DPREFER_IRIS']
-endif
-
 libloader = static_library(
   'loader',
-  ['loader.c', 'pci_id_driver_map.c'],
+  ['loader_dri_helper.c', 'loader.c', sha1_h],
   c_args : loader_c_args,
   gnu_symbol_visibility : 'hidden',
   include_directories : [inc_include, inc_src, inc_util],

@@ -30,7 +30,7 @@
  */
 
 
-#include "glheader.h"
+#include "util/glheader.h"
 
 #include "context.h"
 #include "formats.h"
@@ -868,38 +868,6 @@ _mesa_compressed_format_to_glenum(struct gl_context *ctx,
                     " _mesa_compressed_format_to_glenum()");
       return 0;
    }
-}
-
-
-/*
- * Return the address of the pixel at (col, row, img) in a
- * compressed texture image.
- * \param col, row, img - image position (3D), should be a multiple of the
- *                        format's block size.
- * \param format - compressed image format
- * \param width - image width (stride) in pixels
- * \param image - the image address
- * \return address of pixel at (row, col, img)
- */
-GLubyte *
-_mesa_compressed_image_address(GLint col, GLint row, GLint img,
-                               mesa_format mesaFormat,
-                               GLsizei width, const GLubyte *image)
-{
-   /* XXX only 2D images implemented, not 3D */
-   const GLuint blockSize = _mesa_get_format_bytes(mesaFormat);
-   GLuint bw, bh;
-   GLint offset;
-
-   _mesa_get_format_block_size(mesaFormat, &bw, &bh);
-
-   assert(col % bw == 0);
-   assert(row % bh == 0);
-
-   offset = ((width + bw - 1) / bw) * (row / bh) + col / bw;
-   offset *= blockSize;
-
-   return (GLubyte *) image + offset;
 }
 
 

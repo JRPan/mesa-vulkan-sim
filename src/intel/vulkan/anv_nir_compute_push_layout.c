@@ -29,15 +29,15 @@
 #define sizeof_field(type, field) sizeof(((type *)0)->field)
 
 void
-anv_nir_compute_push_layout(const struct anv_physical_device *pdevice,
+anv_nir_compute_push_layout(nir_shader *nir,
+                            const struct anv_physical_device *pdevice,
                             bool robust_buffer_access,
-                            nir_shader *nir,
                             struct brw_stage_prog_data *prog_data,
                             struct anv_pipeline_bind_map *map,
                             void *mem_ctx)
 {
    const struct brw_compiler *compiler = pdevice->compiler;
-   const struct gen_device_info *devinfo = compiler->devinfo;
+   const struct intel_device_info *devinfo = compiler->devinfo;
    memset(map->push_ranges, 0, sizeof(map->push_ranges));
 
    bool has_const_ubo = false;
@@ -84,9 +84,8 @@ anv_nir_compute_push_layout(const struct anv_physical_device *pdevice,
    const bool has_push_intrinsic = push_start <= push_end;
 
    const bool push_ubo_ranges =
-      (pdevice->info.gen >= 8 || pdevice->info.is_haswell) &&
       has_const_ubo && nir->info.stage != MESA_SHADER_COMPUTE &&
-      !brw_shader_stage_is_bindless(nir->info.stage);
+      !brw_shader_stage_requires_bindless_resources(nir->info.stage);
 
    if (push_ubo_ranges && robust_buffer_access) {
       /* We can't on-the-fly adjust our push ranges because doing so would
@@ -102,8 +101,7 @@ anv_nir_compute_push_layout(const struct anv_physical_device *pdevice,
       push_end = MAX2(push_end, push_reg_mask_end);
    }
 
-   if (nir->info.stage == MESA_SHADER_COMPUTE &&
-       (devinfo->gen <= 12 && !gen_device_info_is_12hp(devinfo))) {
+   if (nir->info.stage == MESA_SHADER_COMPUTE && devinfo->verx10 < 125) {
       /* For compute shaders, we always have to have the subgroup ID.  The
        * back-end compiler will "helpfully" add it for us in the last push
        * constant slot.  Yes, there is an off-by-one error here but that's
@@ -119,7 +117,7 @@ anv_nir_compute_push_layout(const struct anv_physical_device *pdevice,
     * push_end (no push constants is indicated by push_start = UINT_MAX).
     */
    push_start = MIN2(push_start, push_end);
-   push_start = align_down_u32(push_start, 32);
+   push_start = ROUND_DOWN_TO(push_start, 32);
 
    /* For vec4 our push data size needs to be aligned to a vec4 and for
     * scalar, it needs to be aligned to a DWORD.
@@ -150,12 +148,32 @@ anv_nir_compute_push_layout(const struct anv_physical_device *pdevice,
 
                nir_intrinsic_instr *intrin = nir_instr_as_intrinsic(instr);
                switch (intrin->intrinsic) {
-               case nir_intrinsic_load_push_constant:
+               case nir_intrinsic_load_push_constant: {
+                  /* With bindless shaders we load uniforms with SEND
+                   * messages. All the push constants are located after the
+                   * RT_DISPATCH_GLOBALS. We just need to add the offset to
+                   * the address right after RT_DISPATCH_GLOBALS (see
+                   * brw_nir_lower_rt_intrinsics.c).
+                   */
+                  unsigned base_offset =
+                     brw_shader_stage_requires_bindless_resources(nir->info.stage) ? 0 : push_start;
                   intrin->intrinsic = nir_intrinsic_load_uniform;
                   nir_intrinsic_set_base(intrin,
                                          nir_intrinsic_base(intrin) -
-                                         push_start);
+                                         base_offset);
                   break;
+               }
+
+               case nir_intrinsic_load_desc_set_address_intel: {
+                  b->cursor = nir_before_instr(&intrin->instr);
+                  nir_ssa_def *pc_load = nir_load_uniform(b, 1, 64,
+                     nir_imul_imm(b, intrin->src[0].ssa, sizeof(uint64_t)),
+                     .base = offsetof(struct anv_push_constants, desc_sets),
+                     .range = sizeof_field(struct anv_push_constants, desc_sets),
+                     .dest_type = nir_type_uint64);
+                  nir_ssa_def_rewrite_uses(&intrin->dest.ssa, pc_load);
+                  break;
+               }
 
                case nir_intrinsic_load_desc_set_address_intel: {
                   b->cursor = nir_before_instr(&intrin->instr);
@@ -180,17 +198,21 @@ anv_nir_compute_push_layout(const struct anv_physical_device *pdevice,
    if (push_ubo_ranges) {
       brw_nir_analyze_ubo_ranges(compiler, nir, NULL, prog_data->ubo_ranges);
 
-      /* We can push at most 64 registers worth of data.  The back-end
-       * compiler would do this fixup for us but we'd like to calculate
-       * the push constant layout ourselves.
+      /* The vec4 back-end pushes at most 32 regs while the scalar back-end
+       * pushes up to 64.  This is primarily because the scalar back-end has a
+       * massively more competent register allocator and so the risk of
+       * spilling due to UBO pushing isn't nearly as high.
        */
+      const unsigned max_push_regs =
+         compiler->scalar_stage[nir->info.stage] ? 64 : 32;
+
       unsigned total_push_regs = push_constant_range.length;
       for (unsigned i = 0; i < 4; i++) {
-         if (total_push_regs + prog_data->ubo_ranges[i].length > 64)
-            prog_data->ubo_ranges[i].length = 64 - total_push_regs;
+         if (total_push_regs + prog_data->ubo_ranges[i].length > max_push_regs)
+            prog_data->ubo_ranges[i].length = max_push_regs - total_push_regs;
          total_push_regs += prog_data->ubo_ranges[i].length;
       }
-      assert(total_push_regs <= 64);
+      assert(total_push_regs <= max_push_regs);
 
       int n = 0;
 

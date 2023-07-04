@@ -45,7 +45,7 @@
 #include "d3d9.h"
 #include "nine_lock.h"
 
-#include "os/os_thread.h"
+#include "util/u_thread.h"
 
 /* Global mutex as described by MSDN */
 static mtx_t d3dlock_global = _MTX_INITIALIZER_NP;
@@ -3180,9 +3180,9 @@ IDirect3DVolume9Vtbl LockVolume9_vtable = {
     (void *)NineUnknown_AddRef,
     (void *)NineUnknown_ReleaseWithDtorLock,
     (void *)NineUnknown_GetDevice, /* actually part of Volume9 iface */
-    (void *)NineUnknown_SetPrivateData,
-    (void *)NineUnknown_GetPrivateData,
-    (void *)NineUnknown_FreePrivateData,
+    (void *)LockUnknown_SetPrivateData,
+    (void *)LockUnknown_GetPrivateData,
+    (void *)LockUnknown_FreePrivateData,
     (void *)LockVolume9_GetContainer,
     (void *)NineVolume9_GetDesc, /* immutable */
     (void *)LockVolume9_LockBox,

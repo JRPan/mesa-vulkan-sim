@@ -18,7 +18,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-c_sse2_args = ['-msse2', '-mstackrealign']
+c_sse2_args = []
+c_sse2_arg = []
+if ['x86', 'x86_64'].contains(host_machine.cpu_family())
+  c_sse2_arg = ['-msse2']
+  c_sse2_args = [c_sse2_arg, '-mstackrealign']
+endif
 inc_intel = include_directories('.')
 
 subdir('genxml')
@@ -28,9 +33,16 @@ subdir('isl')
 subdir('common')
 subdir('compiler')
 subdir('perf')
+subdir('ds')
 if with_intel_tools
   subdir('tools')
 endif
+if get_option('vulkan-layers').contains('intel-nullhw')
+  subdir('nullhw-layer')
+endif
 if with_intel_vk
   subdir('vulkan')
+endif
+if with_intel_hasvk
+  subdir('vulkan_hasvk')
 endif

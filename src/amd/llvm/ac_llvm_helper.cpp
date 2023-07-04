@@ -28,6 +28,8 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/Target/TargetMachine.h>
+#include <llvm/MC/MCSubtargetInfo.h>
+#include <llvm/Support/CommandLine.h>
 #include <llvm/Transforms/IPO.h>
 
 #include <cstring>
@@ -43,6 +45,17 @@
 #include "ac_llvm_build.h"
 #include "util/macros.h"
 
+bool ac_is_llvm_processor_supported(LLVMTargetMachineRef tm, const char *processor)
+{
+   llvm::TargetMachine *TM = reinterpret_cast<llvm::TargetMachine *>(tm);
+   return TM->getMCSubtargetInfo()->isCPUStringValid(processor);
+}
+
+void ac_reset_llvm_all_options_occurences()
+{
+   llvm::cl::ResetAllOptionOccurrences();
+}
+
 void ac_add_attr_dereferenceable(LLVMValueRef val, uint64_t bytes)
 {
    llvm::Argument *A = llvm::unwrap<llvm::Argument>(val);
@@ -51,14 +64,8 @@ void ac_add_attr_dereferenceable(LLVMValueRef val, uint64_t bytes)
 
 void ac_add_attr_alignment(LLVMValueRef val, uint64_t bytes)
 {
-#if LLVM_VERSION_MAJOR >= 10
    llvm::Argument *A = llvm::unwrap<llvm::Argument>(val);
    A->addAttr(llvm::Attribute::getWithAlignment(A->getContext(), llvm::Align(bytes)));
-#else
-   /* Avoid unused parameter warnings. */
-   (void)val;
-   (void)bytes;
-#endif
 }
 
 bool ac_is_sgpr_param(LLVMValueRef arg)
@@ -66,17 +73,7 @@ bool ac_is_sgpr_param(LLVMValueRef arg)
    llvm::Argument *A = llvm::unwrap<llvm::Argument>(arg);
    llvm::AttributeList AS = A->getParent()->getAttributes();
    unsigned ArgNo = A->getArgNo();
-   return AS.hasAttribute(ArgNo + 1, llvm::Attribute::InReg);
-}
-
-LLVMValueRef ac_llvm_get_called_value(LLVMValueRef call)
-{
-   return LLVMGetCalledValue(call);
-}
-
-bool ac_llvm_is_function(LLVMValueRef v)
-{
-   return LLVMGetValueKind(v) == LLVMFunctionValueKind;
+   return AS.hasParamAttr(ArgNo, llvm::Attribute::InReg);
 }
 
 LLVMModuleRef ac_create_module(LLVMTargetMachineRef tm, LLVMContextRef ctx)
@@ -235,11 +232,7 @@ struct ac_compiler_passes *ac_create_llvm_passes(LLVMTargetMachineRef tm)
    llvm::TargetMachine *TM = reinterpret_cast<llvm::TargetMachine *>(tm);
 
    if (TM->addPassesToEmitFile(p->passmgr, p->ostream, nullptr,
-#if LLVM_VERSION_MAJOR >= 10
                                llvm::CGFT_ObjectFile)) {
-#else
-                               llvm::TargetMachine::CGFT_ObjectFile)) {
-#endif
       fprintf(stderr, "amd: TargetMachine can't emit a file of this type!\n");
       delete p;
       return NULL;
@@ -264,11 +257,6 @@ bool ac_compile_module_to_elf(struct ac_compiler_passes *p, LLVMModuleRef module
 void ac_llvm_add_barrier_noop_pass(LLVMPassManagerRef passmgr)
 {
    llvm::unwrap(passmgr)->add(llvm::createBarrierNoopPass());
-}
-
-void ac_enable_global_isel(LLVMTargetMachineRef tm)
-{
-   reinterpret_cast<llvm::TargetMachine *>(tm)->setGlobalISel(true);
 }
 
 LLVMValueRef ac_build_atomic_rmw(struct ac_llvm_context *ctx, LLVMAtomicRMWBinOp op,
@@ -309,11 +297,9 @@ LLVMValueRef ac_build_atomic_rmw(struct ac_llvm_context *ctx, LLVMAtomicRMWBinOp
    case LLVMAtomicRMWBinOpUMin:
       binop = llvm::AtomicRMWInst::UMin;
       break;
-#if LLVM_VERSION_MAJOR >= 10
    case LLVMAtomicRMWBinOpFAdd:
       binop = llvm::AtomicRMWInst::FAdd;
       break;
-#endif
    default:
       unreachable("invalid LLVMAtomicRMWBinOp");
       break;
@@ -321,6 +307,9 @@ LLVMValueRef ac_build_atomic_rmw(struct ac_llvm_context *ctx, LLVMAtomicRMWBinOp
    unsigned SSID = llvm::unwrap(ctx->context)->getOrInsertSyncScopeID(sync_scope);
    return llvm::wrap(llvm::unwrap(ctx->builder)
                         ->CreateAtomicRMW(binop, llvm::unwrap(ptr), llvm::unwrap(val),
+#if LLVM_VERSION_MAJOR >= 13
+                                          llvm::MaybeAlign(0),
+#endif
                                           llvm::AtomicOrdering::SequentiallyConsistent, SSID));
 }
 
@@ -331,6 +320,9 @@ LLVMValueRef ac_build_atomic_cmp_xchg(struct ac_llvm_context *ctx, LLVMValueRef 
    return llvm::wrap(llvm::unwrap(ctx->builder)
                         ->CreateAtomicCmpXchg(llvm::unwrap(ptr), llvm::unwrap(cmp),
                                               llvm::unwrap(val),
+#if LLVM_VERSION_MAJOR >= 13
+                                              llvm::MaybeAlign(0),
+#endif
                                               llvm::AtomicOrdering::SequentiallyConsistent,
                                               llvm::AtomicOrdering::SequentiallyConsistent, SSID));
 }

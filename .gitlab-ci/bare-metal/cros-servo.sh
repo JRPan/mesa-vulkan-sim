@@ -5,6 +5,7 @@
 
 # We're run from the root of the repo, make a helper var for our paths
 BM=$CI_PROJECT_DIR/install/bare-metal
+CI_COMMON=$CI_PROJECT_DIR/install/common
 
 # Runner config checks
 if [ -z "$BM_SERIAL" ]; then
@@ -89,7 +90,8 @@ echo "$BM_CMDLINE" > /tftp/cmdline
 set +e
 python3 $BM/cros_servo_run.py \
         --cpu $BM_SERIAL \
-        --ec $BM_SERIAL_EC
+        --ec $BM_SERIAL_EC \
+        --test-timeout ${TEST_PHASE_TIMEOUT:-20}
 ret=$?
 set -e
 

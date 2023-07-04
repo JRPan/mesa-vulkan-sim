@@ -26,7 +26,9 @@
  */
 
 #include "nir.h"
+#include "nir_xfb_info.h"
 #include "c11/threads.h"
+#include "util/simple_mtx.h"
 #include <assert.h>
 
 /*
@@ -120,10 +122,18 @@ log_error(validate_state *state, const char *cond, const char *file, int line)
    _mesa_hash_table_insert(state->errors, obj, msg);
 }
 
-#define validate_assert(state, cond) do {             \
-      if (!(cond))                                    \
-         log_error(state, #cond, __FILE__, __LINE__); \
-   } while (0)
+static bool
+validate_assert_impl(validate_state *state, bool cond, const char *str,
+                     const char *file, unsigned line)
+{
+   if (!cond)
+      log_error(state, str, file, line);
+   return cond;
+}
+
+#define validate_assert(state, cond) \
+   validate_assert_impl(state, (cond), #cond, __FILE__, __LINE__)
+
 
 static void validate_src(nir_src *src, validate_state *state,
                          unsigned bit_sizes, unsigned num_components);
@@ -559,8 +569,12 @@ vectorized_intrinsic(nir_intrinsic_instr *intr)
 static enum pipe_format
 image_intrin_format(nir_intrinsic_instr *instr)
 {
-   if (nir_intrinsic_has_format(instr))
+   if (nir_intrinsic_format(instr) != PIPE_FORMAT_NONE)
       return nir_intrinsic_format(instr);
+
+   /* If this not a deref intrinsic, PIPE_FORMAT_NONE is the best we can do */
+   if (nir_intrinsic_infos[instr->intrinsic].src_components[0] != -1)
+      return PIPE_FORMAT_NONE;
 
    nir_variable *var = nir_intrinsic_get_var(instr, 0);
    if (var == NULL)
@@ -620,7 +634,6 @@ validate_intrinsic_instr(nir_intrinsic_instr *instr, validate_state *state)
       if (glsl_type_is_boolean(dst->type))
          src_bit_sizes[1] |= 32;
       validate_assert(state, !nir_deref_mode_may_be(dst, nir_var_read_only_modes));
-      validate_assert(state, (nir_intrinsic_write_mask(instr) & ~((1 << instr->num_components) - 1)) == 0);
       break;
    }
 
@@ -664,6 +677,7 @@ validate_intrinsic_instr(nir_intrinsic_instr *instr, validate_state *state)
    case nir_intrinsic_load_interpolated_input:
    case nir_intrinsic_load_output:
    case nir_intrinsic_load_per_vertex_output:
+   case nir_intrinsic_load_per_primitive_output:
    case nir_intrinsic_load_push_constant:
       /* All memory load operations must load at least a byte */
       validate_assert(state, nir_dest_bit_size(instr->dest) >= 8);
@@ -757,6 +771,33 @@ validate_intrinsic_instr(nir_intrinsic_instr *instr, validate_state *state)
       break;
    }
 
+   case nir_intrinsic_image_deref_atomic_fmin:
+   case nir_intrinsic_image_deref_atomic_fmax:
+   case nir_intrinsic_image_atomic_fmin:
+   case nir_intrinsic_image_atomic_fmax:
+   case nir_intrinsic_bindless_image_atomic_fmin:
+   case nir_intrinsic_bindless_image_atomic_fmax: {
+      enum pipe_format format = image_intrin_format(instr);
+      validate_assert(state, format == PIPE_FORMAT_COUNT ||
+                             format == PIPE_FORMAT_R16_FLOAT ||
+                             format == PIPE_FORMAT_R32_FLOAT ||
+                             format == PIPE_FORMAT_R64_FLOAT);
+      validate_assert(state, nir_dest_bit_size(instr->dest) ==
+                             util_format_get_blocksizebits(format));
+      break;
+   }
+
+   case nir_intrinsic_store_buffer_amd:
+      if (nir_intrinsic_access(instr) & ACCESS_USES_FORMAT_AMD) {
+         unsigned writemask = nir_intrinsic_write_mask(instr);
+
+         /* Make sure the writemask is derived from the component count. */
+         validate_assert(state,
+                         writemask ==
+                         BITFIELD_MASK(nir_src_num_components(instr->src[0])));
+      }
+      break;
+
    default:
       break;
    }
@@ -791,6 +832,37 @@ validate_intrinsic_instr(nir_intrinsic_instr *instr, validate_state *state)
 
    if (!vectorized_intrinsic(instr))
       validate_assert(state, instr->num_components == 0);
+
+   if (nir_intrinsic_has_write_mask(instr)) {
+      unsigned component_mask = BITFIELD_MASK(instr->num_components);
+      validate_assert(state, (nir_intrinsic_write_mask(instr) & ~component_mask) == 0);
+   }
+
+   if (nir_intrinsic_has_io_xfb(instr)) {
+      unsigned used_mask = 0;
+
+      for (unsigned i = 0; i < 4; i++) {
+         nir_io_xfb xfb = i < 2 ? nir_intrinsic_io_xfb(instr) :
+                                  nir_intrinsic_io_xfb2(instr);
+         unsigned xfb_mask = BITFIELD_RANGE(i, xfb.out[i % 2].num_components);
+
+         /* Each component can be used only once by transform feedback info. */
+         validate_assert(state, (xfb_mask & used_mask) == 0);
+         used_mask |= xfb_mask;
+      }
+   }
+
+   if (nir_intrinsic_has_io_semantics(instr) &&
+       !nir_intrinsic_infos[instr->intrinsic].has_dest) {
+      nir_io_semantics sem = nir_intrinsic_io_semantics(instr);
+
+      /* An output that has no effect shouldn't be present in the IR. */
+      validate_assert(state,
+                      (nir_slot_is_sysval_output(sem.location) &&
+                       !sem.no_sysval_output) ||
+                      (nir_slot_is_varying(sem.location) && !sem.no_varying) ||
+                      nir_instr_xfb_write_mask(instr));
+   }
 }
 
 static void
@@ -807,16 +879,93 @@ validate_tex_instr(nir_tex_instr *instr, validate_state *state)
                    0, nir_tex_instr_src_size(instr, i));
 
       switch (instr->src[i].src_type) {
-      case nir_tex_src_texture_deref:
-      case nir_tex_src_sampler_deref:
-         validate_assert(state, instr->src[i].src.is_ssa);
-         validate_assert(state,
-                         instr->src[i].src.ssa->parent_instr->type == nir_instr_type_deref);
+
+      case nir_tex_src_comparator:
+         validate_assert(state, instr->is_shadow);
          break;
+
+      case nir_tex_src_bias:
+         validate_assert(state, instr->op == nir_texop_txb ||
+                                instr->op == nir_texop_tg4);
+         break;
+
+      case nir_tex_src_lod:
+         validate_assert(state, instr->op != nir_texop_tex &&
+                                instr->op != nir_texop_txb &&
+                                instr->op != nir_texop_txd &&
+                                instr->op != nir_texop_lod);
+         break;
+
+      case nir_tex_src_ddx:
+      case nir_tex_src_ddy:
+         validate_assert(state, instr->op == nir_texop_txd);
+         break;
+
+      case nir_tex_src_texture_deref: {
+         nir_deref_instr *deref = nir_src_as_deref(instr->src[i].src);
+         if (!validate_assert(state, deref))
+            break;
+
+         validate_assert(state, glsl_type_is_image(deref->type) ||
+                                glsl_type_is_texture(deref->type) ||
+                                glsl_type_is_sampler(deref->type));
+         switch (instr->op) {
+         case nir_texop_descriptor_amd:
+         case nir_texop_sampler_descriptor_amd:
+            break;
+         case nir_texop_lod:
+            validate_assert(state, nir_alu_type_get_base_type(instr->dest_type) == nir_type_float);
+            break;
+         case nir_texop_samples_identical:
+            validate_assert(state, nir_alu_type_get_base_type(instr->dest_type) == nir_type_bool);
+            break;
+         case nir_texop_txs:
+         case nir_texop_texture_samples:
+         case nir_texop_query_levels:
+         case nir_texop_fragment_mask_fetch_amd:
+         case nir_texop_txf_ms_mcs_intel:
+            validate_assert(state, nir_alu_type_get_base_type(instr->dest_type) == nir_type_int ||
+                                   nir_alu_type_get_base_type(instr->dest_type) == nir_type_uint);
+
+            break;
+         default:
+            validate_assert(state,
+                            glsl_get_sampler_result_type(deref->type) == GLSL_TYPE_VOID ||
+                            glsl_base_type_is_integer(glsl_get_sampler_result_type(deref->type)) ==
+                            (nir_alu_type_get_base_type(instr->dest_type) == nir_type_int ||
+                             nir_alu_type_get_base_type(instr->dest_type) == nir_type_uint));
+         }
+         break;
+      }
+
+      case nir_tex_src_sampler_deref: {
+         nir_deref_instr *deref = nir_src_as_deref(instr->src[i].src);
+         if (!validate_assert(state, deref))
+            break;
+
+         validate_assert(state, glsl_type_is_sampler(deref->type));
+         break;
+      }
+
+      case nir_tex_src_coord:
+      case nir_tex_src_projector:
+      case nir_tex_src_offset:
+      case nir_tex_src_min_lod:
+      case nir_tex_src_ms_index:
+      case nir_tex_src_texture_offset:
+      case nir_tex_src_sampler_offset:
+      case nir_tex_src_plane:
+      case nir_tex_src_texture_handle:
+      case nir_tex_src_sampler_handle:
+         break;
+
       default:
          break;
       }
    }
+
+   if (instr->op != nir_texop_tg4)
+      validate_assert(state, instr->component == 0);
 
    if (nir_tex_instr_has_explicit_tg4_offsets(instr)) {
       validate_assert(state, instr->op == nir_texop_tg4);
@@ -824,6 +973,11 @@ validate_tex_instr(nir_tex_instr *instr, validate_state *state)
    }
 
    validate_dest(&instr->dest, state, 0, nir_tex_instr_dest_size(instr));
+
+   unsigned bit_size = nir_alu_type_get_type_size(instr->dest_type);
+   validate_assert(state,
+                   (bit_size ? bit_size : 32) ==
+                   nir_dest_bit_size(instr->dest));
 }
 
 static void
@@ -1389,7 +1543,11 @@ validate_var_decl(nir_variable *var, nir_variable_mode valid_modes,
       assert(glsl_type_is_array(var->type));
 
       const struct glsl_type *type = glsl_get_array_element(var->type);
-      if (nir_is_per_vertex_io(var, state->shader->info.stage)) {
+      if (nir_is_arrayed_io(var, state->shader->info.stage)) {
+         if (var->data.per_view) {
+            assert(glsl_type_is_array(type));
+            type = glsl_get_array_element(type);
+         }
          assert(glsl_type_is_array(type));
          assert(glsl_type_is_scalar(glsl_get_array_element(type)));
       } else {
@@ -1409,6 +1567,11 @@ validate_var_decl(nir_variable *var, nir_variable_mode valid_modes,
 
    if (var->constant_initializer)
       validate_constant(var->constant_initializer, var->type, state);
+
+   if (var->data.mode == nir_var_image) {
+      validate_assert(state, !var->data.bindless);
+      validate_assert(state, glsl_type_is_image(glsl_without_array(var->type)));
+   }
 
    /*
     * TODO validate some things ir_validate.cpp does (requires more GLSL type
@@ -1491,6 +1654,11 @@ validate_function_impl(nir_function_impl *impl, validate_state *state)
    validate_assert(state, impl->function->impl == impl);
    validate_assert(state, impl->cf_node.parent == NULL);
 
+   if (impl->preamble) {
+      validate_assert(state, impl->function->is_entrypoint);
+      validate_assert(state, impl->preamble->is_preamble);
+   }
+
    validate_assert(state, exec_list_is_empty(&impl->end_block->instr_list));
    validate_assert(state, impl->end_block->successors[0] == NULL);
    validate_assert(state, impl->end_block->successors[1] == NULL);
@@ -1537,10 +1705,13 @@ validate_function_impl(nir_function_impl *impl, validate_state *state)
    static int validate_dominance = -1;
    if (validate_dominance < 0) {
       validate_dominance =
-         env_var_as_boolean("NIR_VALIDATE_SSA_DOMINANCE", false);
+         NIR_DEBUG(VALIDATE_SSA_DOMINANCE);
    }
-   if (validate_dominance)
+   if (validate_dominance) {
+      memset(state->ssa_defs_found, 0, BITSET_WORDS(impl->ssa_alloc) *
+                                       sizeof(BITSET_WORD));
       validate_ssa_dominance(impl, state);
+   }
 }
 
 static void
@@ -1575,7 +1746,7 @@ destroy_validate_state(validate_state *state)
    ralloc_free(state->mem_ctx);
 }
 
-mtx_t fail_dump_mutex = _MTX_INITIALIZER_NP;
+simple_mtx_t fail_dump_mutex = SIMPLE_MTX_INITIALIZER;
 
 static void
 dump_errors(validate_state *state, const char *when)
@@ -1585,7 +1756,7 @@ dump_errors(validate_state *state, const char *when)
    /* Lock around dumping so that we get clean dumps in a multi-threaded
     * scenario
     */
-   mtx_lock(&fail_dump_mutex);
+   simple_mtx_lock(&fail_dump_mutex);
 
    if (when) {
       fprintf(stderr, "NIR validation failed %s\n", when);
@@ -1605,7 +1776,7 @@ dump_errors(validate_state *state, const char *when)
       }
    }
 
-   mtx_unlock(&fail_dump_mutex);
+   simple_mtx_unlock(&fail_dump_mutex);
 
    abort();
 }
@@ -1613,10 +1784,7 @@ dump_errors(validate_state *state, const char *when)
 void
 nir_validate_shader(nir_shader *shader, const char *when)
 {
-   static int should_validate = -1;
-   if (should_validate < 0)
-      should_validate = env_var_as_boolean("NIR_VALIDATE", true);
-   if (!should_validate)
+   if (NIR_DEBUG(NOVALIDATE))
       return;
 
    validate_state state;
@@ -1633,8 +1801,10 @@ nir_validate_shader(nir_shader *shader, const char *when)
       nir_var_system_value |
       nir_var_mem_ssbo |
       nir_var_mem_shared |
+      nir_var_mem_global |
       nir_var_mem_push_const |
-      nir_var_mem_constant;
+      nir_var_mem_constant |
+      nir_var_image;
 
    if (gl_shader_stage_is_callable(shader->info.stage))
       valid_modes |= nir_var_shader_call_data;
@@ -1644,6 +1814,10 @@ nir_validate_shader(nir_shader *shader, const char *when)
        shader->info.stage == MESA_SHADER_INTERSECTION)
       valid_modes |= nir_var_ray_hit_attrib;
 
+   if (shader->info.stage == MESA_SHADER_TASK ||
+       shader->info.stage == MESA_SHADER_MESH)
+      valid_modes |= nir_var_mem_task_payload;
+
    exec_list_validate(&shader->variables);
    nir_foreach_variable_in_shader(var, shader)
      validate_var_decl(var, valid_modes, &state);
@@ -1651,6 +1825,18 @@ nir_validate_shader(nir_shader *shader, const char *when)
    exec_list_validate(&shader->functions);
    foreach_list_typed(nir_function, func, node, &shader->functions) {
       validate_function(func, &state);
+   }
+
+   if (shader->xfb_info != NULL) {
+      /* At least validate that, if nir_shader::xfb_info exists, the shader
+       * has real transform feedback going on.
+       */
+      validate_assert(&state, shader->info.stage == MESA_SHADER_VERTEX ||
+                              shader->info.stage == MESA_SHADER_TESS_EVAL ||
+                              shader->info.stage == MESA_SHADER_GEOMETRY);
+      validate_assert(&state, shader->xfb_info->buffers_written != 0);
+      validate_assert(&state, shader->xfb_info->streams_written != 0);
+      validate_assert(&state, shader->xfb_info->output_count > 0);
    }
 
    if (_mesa_hash_table_num_entries(state.errors) > 0)
@@ -1662,10 +1848,7 @@ nir_validate_shader(nir_shader *shader, const char *when)
 void
 nir_validate_ssa_dominance(nir_shader *shader, const char *when)
 {
-   static int should_validate = -1;
-   if (should_validate < 0)
-      should_validate = env_var_as_boolean("NIR_VALIDATE", true);
-   if (!should_validate)
+   if (NIR_DEBUG(NOVALIDATE))
       return;
 
    validate_state state;

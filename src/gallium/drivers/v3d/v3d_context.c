@@ -32,13 +32,14 @@
 #include "util/u_blitter.h"
 #include "util/u_upload_mgr.h"
 #include "util/u_prim.h"
-#include "indices/u_primconvert.h"
+#include "util/u_debug_cb.h"
 #include "pipe/p_screen.h"
 
 #include "v3d_screen.h"
 #include "v3d_context.h"
 #include "v3d_resource.h"
 #include "broadcom/compiler/v3d_compiler.h"
+#include "broadcom/common/v3d_util.h"
 
 void
 v3d_flush(struct pipe_context *pctx)
@@ -84,18 +85,6 @@ v3d_memory_barrier(struct pipe_context *pctx, unsigned int flags)
         /* We only need to flush jobs writing to SSBOs/images. */
         perf_debug("Flushing all jobs for glMemoryBarrier(), could do better");
         v3d_flush(pctx);
-}
-
-static void
-v3d_set_debug_callback(struct pipe_context *pctx,
-                       const struct pipe_debug_callback *cb)
-{
-        struct v3d_context *v3d = v3d_context(pctx);
-
-        if (cb)
-                v3d->debug = *cb;
-        else
-                memset(&v3d->debug, 0, sizeof(v3d->debug));
 }
 
 static void
@@ -195,21 +184,35 @@ v3d_get_real_line_width(struct v3d_context *v3d)
 }
 
 void
+v3d_ensure_prim_counts_allocated(struct v3d_context *ctx)
+{
+        if (ctx->prim_counts)
+                return;
+
+        /* Init all 7 counters and 1 padding to 0 */
+        uint32_t zeroes[8] = { 0 };
+        u_upload_data(ctx->uploader,
+                      0, sizeof(zeroes), 32, zeroes,
+                      &ctx->prim_counts_offset,
+                      &ctx->prim_counts);
+}
+
+void
 v3d_flag_dirty_sampler_state(struct v3d_context *v3d,
                              enum pipe_shader_type shader)
 {
         switch (shader) {
         case PIPE_SHADER_VERTEX:
-                v3d->dirty |= VC5_DIRTY_VERTTEX;
+                v3d->dirty |= V3D_DIRTY_VERTTEX;
                 break;
         case PIPE_SHADER_GEOMETRY:
-                v3d->dirty |= VC5_DIRTY_GEOMTEX;
+                v3d->dirty |= V3D_DIRTY_GEOMTEX;
                 break;
         case PIPE_SHADER_FRAGMENT:
-                v3d->dirty |= VC5_DIRTY_FRAGTEX;
+                v3d->dirty |= V3D_DIRTY_FRAGTEX;
                 break;
         case PIPE_SHADER_COMPUTE:
-                v3d->dirty |= VC5_DIRTY_COMPTEX;
+                v3d->dirty |= V3D_DIRTY_COMPTEX;
                 break;
         default:
                 unreachable("Unsupported shader stage");
@@ -228,6 +231,7 @@ v3d_create_texture_shader_state_bo(struct v3d_context *v3d,
 
 void
 v3d_get_tile_buffer_size(bool is_msaa,
+                         bool double_buffer,
                          uint32_t nr_cbufs,
                          struct pipe_surface **cbufs,
                          struct pipe_surface *bbuf,
@@ -235,27 +239,15 @@ v3d_get_tile_buffer_size(bool is_msaa,
                          uint32_t *tile_height,
                          uint32_t *max_bpp)
 {
-        static const uint8_t tile_sizes[] = {
-                64, 64,
-                64, 32,
-                32, 32,
-                32, 16,
-                16, 16,
-        };
-        int tile_size_index = 0;
-        if (is_msaa)
-                tile_size_index += 2;
+        assert(!is_msaa || !double_buffer);
 
-        if (cbufs[3] || cbufs[2])
-                tile_size_index += 2;
-        else if (cbufs[1])
-                tile_size_index++;
-
+        uint32_t max_cbuf_idx = 0;
         *max_bpp = 0;
         for (int i = 0; i < nr_cbufs; i++) {
                 if (cbufs[i]) {
                         struct v3d_surface *surf = v3d_surface(cbufs[i]);
                         *max_bpp = MAX2(*max_bpp, surf->internal_bpp);
+                        max_cbuf_idx = MAX2(i, max_cbuf_idx);
                 }
         }
 
@@ -265,11 +257,9 @@ v3d_get_tile_buffer_size(bool is_msaa,
                 *max_bpp = MAX2(*max_bpp, bsurf->internal_bpp);
         }
 
-        tile_size_index += *max_bpp;
-
-        assert(tile_size_index < ARRAY_SIZE(tile_sizes));
-        *tile_width = tile_sizes[tile_size_index * 2 + 0];
-        *tile_height = tile_sizes[tile_size_index * 2 + 1];
+        v3d_choose_tile_size(max_cbuf_idx + 1, *max_bpp,
+                             is_msaa, double_buffer,
+                             tile_width, tile_height);
 }
 
 static void
@@ -282,9 +272,6 @@ v3d_context_destroy(struct pipe_context *pctx)
         if (v3d->blitter)
                 util_blitter_destroy(v3d->blitter);
 
-        if (v3d->primconvert)
-                util_primconvert_destroy(v3d->primconvert);
-
         if (v3d->uploader)
                 u_upload_destroy(v3d->uploader);
         if (v3d->state_uploader)
@@ -295,8 +282,21 @@ v3d_context_destroy(struct pipe_context *pctx)
 
         slab_destroy_child(&v3d->transfer_pool);
 
-        pipe_surface_reference(&v3d->framebuffer.cbufs[0], NULL);
+        for (int i = 0; i < v3d->framebuffer.nr_cbufs; i++)
+                pipe_surface_reference(&v3d->framebuffer.cbufs[i], NULL);
+
         pipe_surface_reference(&v3d->framebuffer.zsbuf, NULL);
+
+        if (v3d->sand8_blit_vs)
+                pctx->delete_vs_state(pctx, v3d->sand8_blit_vs);
+        if (v3d->sand8_blit_fs_luma)
+                pctx->delete_fs_state(pctx, v3d->sand8_blit_fs_luma);
+        if (v3d->sand8_blit_fs_chroma)
+                pctx->delete_fs_state(pctx, v3d->sand8_blit_fs_chroma);
+        if (v3d->sand30_blit_vs)
+                pctx->delete_vs_state(pctx, v3d->sand30_blit_vs);
+        if (v3d->sand30_blit_fs)
+                pctx->delete_fs_state(pctx, v3d->sand30_blit_fs);
 
         v3d_program_fini(pctx);
 
@@ -331,8 +331,8 @@ v3d_context_create(struct pipe_screen *pscreen, void *priv, unsigned flags)
         struct v3d_context *v3d;
 
         /* Prevent dumping of the shaders built during context setup. */
-        uint32_t saved_shaderdb_flag = V3D_DEBUG & V3D_DEBUG_SHADERDB;
-        V3D_DEBUG &= ~V3D_DEBUG_SHADERDB;
+        uint32_t saved_shaderdb_flag = v3d_mesa_debug & V3D_DEBUG_SHADERDB;
+        v3d_mesa_debug &= ~V3D_DEBUG_SHADERDB;
 
         v3d = rzalloc(NULL, struct v3d_context);
         if (!v3d)
@@ -353,7 +353,7 @@ v3d_context_create(struct pipe_screen *pscreen, void *priv, unsigned flags)
         pctx->destroy = v3d_context_destroy;
         pctx->flush = v3d_pipe_flush;
         pctx->memory_barrier = v3d_memory_barrier;
-        pctx->set_debug_callback = v3d_set_debug_callback;
+        pctx->set_debug_callback = u_default_set_debug_callback;
         pctx->invalidate_resource = v3d_invalidate_resource;
         pctx->get_sample_position = v3d_get_sample_position;
 
@@ -387,12 +387,7 @@ v3d_context_create(struct pipe_screen *pscreen, void *priv, unsigned flags)
                 goto fail;
         v3d->blitter->use_index_buffer = true;
 
-        v3d->primconvert = util_primconvert_create(pctx,
-                                                   (1 << PIPE_PRIM_QUADS) - 1);
-        if (!v3d->primconvert)
-                goto fail;
-
-        V3D_DEBUG |= saved_shaderdb_flag;
+        v3d_mesa_debug |= saved_shaderdb_flag;
 
         v3d->sample_mask = (1 << V3D_MAX_SAMPLES) - 1;
         v3d->active_queries = true;

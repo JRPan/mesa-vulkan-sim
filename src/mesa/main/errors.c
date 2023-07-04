@@ -35,7 +35,15 @@
 
 #include "context.h"
 #include "debug_output.h"
+#include "util/detect_os.h"
+#include "api_exec_decl.h"
 
+#if DETECT_OS_ANDROID
+#  include <log/log.h>
+#endif
+#if DETECT_OS_WINDOWS
+#  include <windows.h>
+#endif
 
 static FILE *LogFile = NULL;
 
@@ -92,6 +100,10 @@ output_if_debug(const char *prefixString, const char *outputString,
             snprintf(buf, sizeof(buf), "%s%s", outputString, newline ? "\n" : "");
          OutputDebugStringA(buf);
       }
+#endif
+
+#if DETECT_OS_ANDROID
+      LOG_PRI(ANDROID_LOG_ERROR, prefixString ? prefixString : "MESA", "%s%s", outputString, newline ? "\n" : "");
 #endif
    }
 }
@@ -274,7 +286,7 @@ _mesa_gl_debug(struct gl_context *ctx,
 
    /* limit the message to fit within KHR_debug buffers */
    char s[MAX_DEBUG_MESSAGE_LENGTH];
-   strncpy(s, msg, MAX_DEBUG_MESSAGE_LENGTH);
+   strncpy(s, msg, MAX_DEBUG_MESSAGE_LENGTH - 1);
    s[MAX_DEBUG_MESSAGE_LENGTH - 1] = '\0';
    len = MAX_DEBUG_MESSAGE_LENGTH - 1;
    _mesa_log_msg(ctx, source, type, *id, severity, len, s);
@@ -405,6 +417,11 @@ _mesa_log(const char *fmtString, ...)
    output_if_debug(NULL, s, GL_FALSE);
 }
 
+void
+_mesa_log_direct(const char *string)
+{
+   output_if_debug(NULL, string, GL_TRUE);
+}
 
 /**
  * Report debug information from the shader compiler via GL_ARB_debug_output.

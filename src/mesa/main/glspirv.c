@@ -32,6 +32,7 @@
 #include "program/program.h"
 
 #include "util/u_atomic.h"
+#include "api_exec_decl.h"
 
 void
 _mesa_spirv_module_reference(struct gl_spirv_module **dest,
@@ -155,8 +156,7 @@ _mesa_spirv_link_shaders(struct gl_context *ctx, struct gl_shader_program *prog)
          return;
       }
 
-      _mesa_reference_shader_program_data(ctx,
-                                          &gl_prog->sh.data,
+      _mesa_reference_shader_program_data(&gl_prog->sh.data,
                                           prog->data);
 
       /* Don't use _mesa_reference_program() just take ownership */
@@ -243,8 +243,8 @@ _mesa_spirv_to_nir(struct gl_context *ctx,
 
    const struct spirv_to_nir_options spirv_options = {
       .environment = NIR_SPIRV_OPENGL,
-      .frag_coord_is_sysval = ctx->Const.GLSLFragCoordIsSysVal,
       .use_deref_buffer_array_length = true,
+      .subgroup_size = SUBGROUP_SIZE_UNIFORM,
       .caps = ctx->Const.SpirVCapabilities,
       .ubo_addr_format = nir_address_format_32bit_index_offset,
       .ssbo_addr_format = nir_address_format_32bit_index_offset,
@@ -279,6 +279,14 @@ _mesa_spirv_to_nir(struct gl_context *ctx,
 
    nir->info.separate_shader = linked_shader->Program->info.separate_shader;
 
+   /* Convert some sysvals to input varyings. */
+   const struct nir_lower_sysvals_to_varyings_options sysvals_to_varyings = {
+      .frag_coord = !ctx->Const.GLSLFragCoordIsSysVal,
+      .point_coord = !ctx->Const.GLSLPointCoordIsSysVal,
+      .front_face = !ctx->Const.GLSLFrontFacingIsSysVal,
+   };
+   NIR_PASS_V(nir, nir_lower_sysvals_to_varyings, &sysvals_to_varyings);
+
    /* We have to lower away local constant initializers right before we
     * inline functions.  That way they get properly initialized at the top
     * of the function and not at the top of its caller.
@@ -290,11 +298,7 @@ _mesa_spirv_to_nir(struct gl_context *ctx,
    NIR_PASS_V(nir, nir_opt_deref);
 
    /* Pick off the single entrypoint that we want */
-   foreach_list_typed_safe(nir_function, func, node, &nir->functions) {
-      if (!func->is_entrypoint)
-         exec_node_remove(&func->node);
-   }
-   assert(exec_list_length(&nir->functions) == 1);
+   nir_remove_non_entrypoints(nir);
 
    /* Now that we've deleted all but the main function, we can go ahead and
     * lower the rest of the constant initializers.  We do this here so that

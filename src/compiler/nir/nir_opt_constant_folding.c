@@ -103,10 +103,9 @@ try_fold_alu(nir_builder *b, nir_alu_instr *alu)
    nir_ssa_def *imm = nir_build_imm(b, alu->dest.dest.ssa.num_components,
                                        alu->dest.dest.ssa.bit_size,
                                        dest);
-   nir_ssa_def_rewrite_uses(&alu->dest.dest.ssa, nir_src_for_ssa(imm));
+   nir_ssa_def_rewrite_uses(&alu->dest.dest.ssa, imm);
    nir_instr_remove(&alu->instr);
-
-   ralloc_free(alu);
+   nir_instr_free(&alu->instr);
 
    return true;
 }
@@ -220,7 +219,7 @@ try_fold_intrinsic(nir_builder *b, nir_intrinsic_instr *intrin,
          b->cursor = nir_before_instr(&intrin->instr);
          nir_ssa_def *val = nir_build_imm(b, intrin->dest.ssa.num_components,
                                              intrin->dest.ssa.bit_size, v);
-         nir_ssa_def_rewrite_uses(&intrin->dest.ssa, nir_src_for_ssa(val));
+         nir_ssa_def_rewrite_uses(&intrin->dest.ssa, val);
          nir_instr_remove(&intrin->instr);
          return true;
       }
@@ -259,7 +258,7 @@ try_fold_intrinsic(nir_builder *b, nir_intrinsic_instr *intrin,
          val = nir_build_imm(b, intrin->dest.ssa.num_components,
                                 intrin->dest.ssa.bit_size, imm);
       }
-      nir_ssa_def_rewrite_uses(&intrin->dest.ssa, nir_src_for_ssa(val));
+      nir_ssa_def_rewrite_uses(&intrin->dest.ssa, val);
       nir_instr_remove(&intrin->instr);
       return true;
    }
@@ -284,7 +283,7 @@ try_fold_intrinsic(nir_builder *b, nir_intrinsic_instr *intrin,
        */
       if (nir_src_is_const(intrin->src[0])) {
          nir_ssa_def_rewrite_uses(&intrin->dest.ssa,
-                                  nir_src_for_ssa(intrin->src[0].ssa));
+                                  intrin->src[0].ssa);
          nir_instr_remove(&intrin->instr);
          return true;
       }
@@ -295,7 +294,7 @@ try_fold_intrinsic(nir_builder *b, nir_intrinsic_instr *intrin,
       if (nir_src_is_const(intrin->src[0])) {
          b->cursor = nir_before_instr(&intrin->instr);
          nir_ssa_def_rewrite_uses(&intrin->dest.ssa,
-                                  nir_src_for_ssa(nir_imm_true(b)));
+                                  nir_imm_true(b));
          nir_instr_remove(&intrin->instr);
          return true;
       }
@@ -307,6 +306,64 @@ try_fold_intrinsic(nir_builder *b, nir_intrinsic_instr *intrin,
 }
 
 static bool
+try_fold_txb_to_tex(nir_builder *b, nir_tex_instr *tex)
+{
+   assert(tex->op == nir_texop_txb);
+
+   const int bias_idx = nir_tex_instr_src_index(tex, nir_tex_src_bias);
+
+   /* nir_to_tgsi_lower_tex mangles many kinds of texture instructions,
+    * including txb, into invalid states.  It removes the special
+    * parameters and appends the values to the texture coordinate.
+    */
+   if (bias_idx < 0)
+      return false;
+
+   if (nir_src_is_const(tex->src[bias_idx].src) &&
+       nir_src_as_float(tex->src[bias_idx].src) == 0.0) {
+      nir_tex_instr_remove_src(tex, bias_idx);
+      tex->op = nir_texop_tex;
+      return true;
+   }
+
+   return false;
+}
+
+static bool
+try_fold_tex_offset(nir_tex_instr *tex, unsigned *index,
+                    nir_tex_src_type src_type)
+{
+   const int src_idx = nir_tex_instr_src_index(tex, src_type);
+   if (src_idx < 0)
+      return false;
+
+   if (!nir_src_is_const(tex->src[src_idx].src))
+      return false;
+
+   *index += nir_src_as_uint(tex->src[src_idx].src);
+   nir_tex_instr_remove_src(tex, src_idx);
+
+   return true;
+}
+
+static bool
+try_fold_tex(nir_builder *b, nir_tex_instr *tex)
+{
+   bool progress = false;
+
+   progress |= try_fold_tex_offset(tex, &tex->texture_index,
+                                   nir_tex_src_texture_offset);
+   progress |= try_fold_tex_offset(tex, &tex->sampler_index,
+                                   nir_tex_src_sampler_offset);
+
+   /* txb with a bias of constant zero is just tex. */
+   if (tex->op == nir_texop_txb)
+      progress |= try_fold_txb_to_tex(b, tex);
+
+   return progress;
+}
+
+static bool
 try_fold_instr(nir_builder *b, nir_instr *instr, void *_state)
 {
    switch (instr->type) {
@@ -314,6 +371,8 @@ try_fold_instr(nir_builder *b, nir_instr *instr, void *_state)
       return try_fold_alu(b, nir_instr_as_alu(instr));
    case nir_instr_type_intrinsic:
       return try_fold_intrinsic(b, nir_instr_as_intrinsic(instr), _state);
+   case nir_instr_type_tex:
+      return try_fold_tex(b, nir_instr_as_tex(instr));
    default:
       /* Don't know how to constant fold */
       return false;

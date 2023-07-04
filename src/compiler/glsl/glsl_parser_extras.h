@@ -329,6 +329,11 @@ struct _mesa_glsl_parse_state {
              EXT_shader_framebuffer_fetch_non_coherent_enable;
    }
 
+   bool has_framebuffer_fetch_zs() const
+   {
+      return ARM_shader_framebuffer_fetch_depth_stencil_enable;
+   }
+
    bool has_texture_cube_map_array() const
    {
       return ARB_texture_cube_map_array_enable ||
@@ -368,10 +373,15 @@ struct _mesa_glsl_parse_state {
              is_version(400, 0);
    }
 
+   void set_valid_gl_and_glsl_versions(YYLTYPE *locp);
+
    void process_version_directive(YYLTYPE *locp, int version,
                                   const char *ident);
 
-   struct gl_context *const ctx;
+   struct gl_context *const ctx; /* only to be used for debug callback. */
+   const struct gl_extensions *exts;
+   const struct gl_constants *consts;
+   gl_api api;
    void *scanner;
    exec_list translation_unit;
    glsl_symbol_table *symbols;
@@ -735,6 +745,10 @@ struct _mesa_glsl_parse_state {
    bool ARB_shading_language_include_warn;
    bool ARB_shading_language_packing_enable;
    bool ARB_shading_language_packing_warn;
+   bool ARB_sparse_texture2_enable;
+   bool ARB_sparse_texture2_warn;
+   bool ARB_sparse_texture_clamp_enable;
+   bool ARB_sparse_texture_clamp_warn;
    bool ARB_tessellation_shader_enable;
    bool ARB_tessellation_shader_warn;
    bool ARB_texture_cube_map_array_enable;
@@ -818,6 +832,8 @@ struct _mesa_glsl_parse_state {
    bool AMD_vertex_shader_viewport_index_warn;
    bool ANDROID_extension_pack_es31a_enable;
    bool ANDROID_extension_pack_es31a_warn;
+   bool ARM_shader_framebuffer_fetch_depth_stencil_enable;
+   bool ARM_shader_framebuffer_fetch_depth_stencil_warn;
    bool EXT_blend_func_extended_enable;
    bool EXT_blend_func_extended_warn;
    bool EXT_clip_cull_distance_enable;
@@ -892,6 +908,8 @@ struct _mesa_glsl_parse_state {
    bool NV_shader_atomic_float_warn;
    bool NV_shader_atomic_int64_enable;
    bool NV_shader_atomic_int64_warn;
+   bool NV_shader_noperspective_interpolation_enable;
+   bool NV_shader_noperspective_interpolation_warn;
    bool NV_viewport_array2_enable;
    bool NV_viewport_array2_warn;
    /*@}*/
@@ -943,6 +961,7 @@ struct _mesa_glsl_parse_state {
    bool allow_extension_directive_midshader;
    bool allow_glsl_120_subset_in_110;
    bool allow_builtin_variable_redeclaration;
+   bool ignore_write_to_readonly_var;
 
    /**
     * Known subroutine type declarations.

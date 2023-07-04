@@ -30,7 +30,7 @@
 #include <stdbool.h>
 
 #include <assert.h>
-#include "c11_compat.h"
+#include "ac_rgp.h"
 
 struct radeon_cmdbuf;
 struct radeon_info;
@@ -44,6 +44,17 @@ struct ac_thread_trace_data {
    uint32_t buffer_size;
    int start_frame;
    char *trigger_file;
+
+   struct rgp_code_object rgp_code_object;
+   struct rgp_loader_events rgp_loader_events;
+   struct rgp_pso_correlation rgp_pso_correlation;
+
+   struct rgp_queue_info rgp_queue_info;
+   struct rgp_queue_event rgp_queue_event;
+
+   struct rgp_clock_calibration rgp_clock_calibration;
+
+   struct hash_table_u64 *pipeline_bos;
 };
 
 #define SQTT_BUFFER_ALIGN_SHIFT 12
@@ -64,24 +75,31 @@ struct ac_thread_trace_se {
    uint32_t compute_unit;
 };
 
+#define SQTT_MAX_TRACES 6
+
 struct ac_thread_trace {
+   struct ac_thread_trace_data *data;
    uint32_t num_traces;
-   struct ac_thread_trace_se traces[4];
+   struct ac_thread_trace_se traces[SQTT_MAX_TRACES];
 };
 
 uint64_t
 ac_thread_trace_get_info_offset(unsigned se);
 
 uint64_t
-ac_thread_trace_get_data_offset(struct ac_thread_trace_data *data, unsigned se);
+ac_thread_trace_get_data_offset(const struct radeon_info *rad_info,
+                                const struct ac_thread_trace_data *data, unsigned se);
 uint64_t
 ac_thread_trace_get_info_va(uint64_t va, unsigned se);
 
 uint64_t
-ac_thread_trace_get_data_va(struct ac_thread_trace_data *data, uint64_t va, unsigned se);
+ac_thread_trace_get_data_va(const struct radeon_info *rad_info,
+                            const struct ac_thread_trace_data *data, uint64_t va, unsigned se);
 
 bool
-ac_is_thread_trace_complete(struct radeon_info *rad_info, const struct ac_thread_trace_info *info);
+ac_is_thread_trace_complete(struct radeon_info *rad_info,
+                            const struct ac_thread_trace_data *data,
+                            const struct ac_thread_trace_info *info);
 
 uint32_t
 ac_get_expected_buffer_size(struct radeon_info *rad_info,
@@ -275,6 +293,14 @@ enum rgp_sqtt_marker_event_type
    EventInternalUnknown = 26,
    EventCmdDrawIndirectCount = 27,
    EventCmdDrawIndexedIndirectCount = 28,
+   /* gap */
+   EventCmdTraceRaysKHR = 30,
+   EventCmdTraceRaysIndirectKHR = 31,
+   EventCmdBuildAccelerationStructuresKHR = 32,
+   EventCmdBuildAccelerationStructuresIndirectKHR = 33,
+   EventCmdCopyAccelerationStructureKHR = 34,
+   EventCmdCopyAccelerationStructureToMemoryKHR = 35,
+   EventCmdCopyMemoryToAccelerationStructureKHR = 36,
    EventInvalid = 0xffffffff
 };
 
@@ -417,5 +443,72 @@ struct rgp_sqtt_marker_layout_transition {
 
 static_assert(sizeof(struct rgp_sqtt_marker_layout_transition) == 8,
               "rgp_sqtt_marker_layout_transition doesn't match RGP spec");
+
+
+/**
+ * "User Event" RGP SQTT instrumentation marker (Table 8)
+ */
+struct rgp_sqtt_marker_user_event {
+   union {
+      struct {
+         uint32_t identifier : 4;
+         uint32_t reserved0 : 8;
+         uint32_t data_type : 8;
+         uint32_t reserved1 : 12;
+      };
+      uint32_t dword01;
+   };
+};
+struct rgp_sqtt_marker_user_event_with_length {
+   struct rgp_sqtt_marker_user_event user_event;
+   uint32_t length;
+};
+
+static_assert(sizeof(struct rgp_sqtt_marker_user_event) == 4,
+              "rgp_sqtt_marker_user_event doesn't match RGP spec");
+
+enum rgp_sqtt_marker_user_event_type
+{
+   UserEventTrigger = 0,
+   UserEventPop,
+   UserEventPush,
+   UserEventObjectName,
+};
+
+/**
+ * "Pipeline bind" RGP SQTT instrumentation marker (Table 12)
+ */
+struct rgp_sqtt_marker_pipeline_bind {
+   union {
+      struct {
+         uint32_t identifier : 4;
+         uint32_t ext_dwords : 3;
+         uint32_t bind_point : 1;
+         uint32_t cb_id : 20;
+         uint32_t reserved : 4;
+      };
+      uint32_t dword01;
+   };
+   union {
+      uint32_t api_pso_hash[2];
+      struct {
+         uint32_t dword02;
+         uint32_t dword03;
+      };
+   };
+};
+
+static_assert(sizeof(struct rgp_sqtt_marker_pipeline_bind) == 12,
+              "rgp_sqtt_marker_pipeline_bind doesn't match RGP spec");
+
+
+bool ac_sqtt_add_pso_correlation(struct ac_thread_trace_data *thread_trace_data,
+                                 uint64_t pipeline_hash);
+
+bool ac_sqtt_add_code_object_loader_event(struct ac_thread_trace_data *thread_trace_data,
+                                          uint64_t pipeline_hash,
+                                          uint64_t base_address);
+
+bool ac_check_profile_state(const struct radeon_info *info);
 
 #endif

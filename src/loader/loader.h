@@ -28,6 +28,9 @@
 #define LOADER_H
 
 #include <stdbool.h>
+#include <sys/stat.h>
+#include <stddef.h>
+#include "GL/internal/dri_interface.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,11 +46,21 @@ loader_open_device(const char *);
 int
 loader_open_render_node(const char *name);
 
+char *
+loader_get_render_node(dev_t device);
+
 bool
 loader_get_pci_id_for_fd(int fd, int *vendor_id, int *chip_id);
 
 char *
 loader_get_driver_for_fd(int fd);
+
+void *
+loader_open_driver_lib(const char *driver_name,
+                       const char *lib_suffix,
+                       const char **search_path_vars,
+                       const char *default_search_path,
+                       bool warn_on_fail);
 
 const struct __DRIextensionRec **
 loader_open_driver(const char *driver_name,
@@ -80,6 +93,23 @@ loader_set_logger(loader_logger *logger);
 
 char *
 loader_get_extensions_name(const char *driver_name);
+
+struct dri_extension_match {
+   /* __DRI_* extension name */
+   const char *name;
+
+   /* Required minimum version in the extension struct */
+   int version;
+
+   /* offset in the data arg at which to store a pointer to the extension */
+   int offset;
+
+   bool optional;
+};
+
+bool loader_bind_extensions(void *data,
+                            const struct dri_extension_match *matches, size_t num_matches,
+                            const __DRIextension **extensions);
 
 #ifdef __cplusplus
 }

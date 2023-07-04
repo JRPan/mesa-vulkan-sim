@@ -29,7 +29,7 @@
  */
 
 #include <stdio.h>
-#include "glheader.h"
+#include "util/glheader.h"
 #include "bufferobj.h"
 #include "context.h"
 #include "enums.h"
@@ -41,7 +41,9 @@
 #include "state.h"
 #include "util/bitscan.h"
 #include "util/bitset.h"
+#include "api_exec_decl.h"
 
+#include "state_tracker/st_cb_texture.h"
 
 /**
  * Default texture combine environment state.  This is used to initialize
@@ -72,13 +74,11 @@ _mesa_copy_texture_state( const struct gl_context *src, struct gl_context *dst )
    assert(dst);
 
    dst->Texture.CurrentUnit = src->Texture.CurrentUnit;
-   dst->Texture._GenFlags = src->Texture._GenFlags;
-   dst->Texture._TexGenEnabled = src->Texture._TexGenEnabled;
-   dst->Texture._TexMatEnabled = src->Texture._TexMatEnabled;
 
    /* per-unit state */
    for (u = 0; u < src->Const.MaxCombinedTextureImageUnits; u++) {
       dst->Texture.Unit[u].LodBias = src->Texture.Unit[u].LodBias;
+      dst->Texture.Unit[u].LodBiasQuantized = src->Texture.Unit[u].LodBiasQuantized;
 
       /*
        * XXX strictly speaking, we should compare texture names/ids and
@@ -327,7 +327,7 @@ active_texture(GLenum texture, bool no_error)
     *
     * https://bugs.freedesktop.org/show_bug.cgi?id=105436
     */
-   FLUSH_VERTICES(ctx, _NEW_TEXTURE_STATE);
+   FLUSH_VERTICES(ctx, _NEW_TEXTURE_STATE, GL_TEXTURE_BIT);
 
    ctx->Texture.CurrentUnit = texUnit;
    if (ctx->Transform.MatrixMode == GL_TEXTURE) {
@@ -390,10 +390,11 @@ _mesa_ClientActiveTexture(GLenum texture)
  *
  * \param ctx GL context.
  */
-void
+GLbitfield
 _mesa_update_texture_matrices(struct gl_context *ctx)
 {
    GLuint u;
+   GLbitfield old_texmat_enabled = ctx->Texture._TexMatEnabled;
 
    ctx->Texture._TexMatEnabled = 0x0;
 
@@ -407,6 +408,11 @@ _mesa_update_texture_matrices(struct gl_context *ctx)
 	    ctx->Texture._TexMatEnabled |= ENABLE_TEXMAT(u);
       }
    }
+
+   if (old_texmat_enabled != ctx->Texture._TexMatEnabled)
+      return _NEW_FF_VERT_PROGRAM | _NEW_FF_FRAG_PROGRAM;
+
+   return 0;
 }
 
 
@@ -882,7 +888,7 @@ fix_missing_textures_for_atifs(struct gl_context *ctx,
  *
  * \param ctx GL context.
  */
-void
+GLbitfield
 _mesa_update_texture_state(struct gl_context *ctx)
 {
    struct gl_program *prog[MESA_SHADER_STAGES];
@@ -899,6 +905,11 @@ _mesa_update_texture_state(struct gl_context *ctx)
 
    /* TODO: only set this if there are actual changes */
    ctx->NewState |= _NEW_TEXTURE_OBJECT | _NEW_TEXTURE_STATE;
+
+   GLbitfield old_genflags = ctx->Texture._GenFlags;
+   GLbitfield old_enabled_coord_units = ctx->Texture._EnabledCoordUnits;
+   GLbitfield old_texgen_enabled = ctx->Texture._TexGenEnabled;
+   GLbitfield old_texmat_enabled = ctx->Texture._TexMatEnabled;
 
    ctx->Texture._GenFlags = 0x0;
    ctx->Texture._TexMatEnabled = 0x0;
@@ -938,6 +949,19 @@ _mesa_update_texture_state(struct gl_context *ctx)
 
    if (!prog[MESA_SHADER_FRAGMENT] || !prog[MESA_SHADER_VERTEX])
       update_texgen(ctx);
+
+   GLbitfield new_state = 0;
+
+   if (old_enabled_coord_units != ctx->Texture._EnabledCoordUnits ||
+       old_texgen_enabled != ctx->Texture._TexGenEnabled ||
+       old_texmat_enabled != ctx->Texture._TexMatEnabled) {
+      new_state |= _NEW_FF_VERT_PROGRAM | _NEW_FF_FRAG_PROGRAM;
+   }
+
+   if (old_genflags != ctx->Texture._GenFlags)
+      new_state |= _NEW_TNL_SPACES;
+
+   return new_state;
 }
 
 
@@ -983,10 +1007,10 @@ alloc_proxy_textures( struct gl_context *ctx )
 
    for (tgt = 0; tgt < NUM_TEXTURE_TARGETS; tgt++) {
       if (!(ctx->Texture.ProxyTex[tgt]
-            = ctx->Driver.NewTextureObject(ctx, 0, targets[tgt]))) {
+            = _mesa_new_texture_object(ctx, 0, targets[tgt]))) {
          /* out of memory, free what we did allocate */
          while (--tgt >= 0) {
-            ctx->Driver.DeleteTexture(ctx, ctx->Texture.ProxyTex[tgt]);
+            _mesa_delete_texture_object(ctx, ctx->Texture.ProxyTex[tgt]);
          }
          return GL_FALSE;
       }
@@ -1110,7 +1134,7 @@ _mesa_free_texture_data(struct gl_context *ctx)
 
    /* Free proxy texture objects */
    for (tgt = 0; tgt < NUM_TEXTURE_TARGETS; tgt++)
-      ctx->Driver.DeleteTexture(ctx, ctx->Texture.ProxyTex[tgt]);
+      _mesa_delete_texture_object(ctx, ctx->Texture.ProxyTex[tgt]);
 
    /* GL_ARB_texture_buffer_object */
    _mesa_reference_buffer_object(ctx, &ctx->Texture.BufferObject, NULL);

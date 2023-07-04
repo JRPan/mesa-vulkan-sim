@@ -67,16 +67,16 @@ cmp_ubo_range_entry(const void *va, const void *vb)
    const struct ubo_range_entry *a = va;
    const struct ubo_range_entry *b = vb;
 
-   /* Rank based on scores */
+   /* Rank based on scores, descending order */
    int delta = score(b) - score(a);
 
-   /* Then use the UBO block index as a tie-breaker */
+   /* Then use the UBO block index as a tie-breaker, descending order */
    if (delta == 0)
       delta = b->range.block - a->range.block;
 
-   /* Finally use the UBO offset as a second tie-breaker */
+   /* Finally use the start offset as a second tie-breaker, ascending order */
    if (delta == 0)
-      delta = b->range.block - a->range.block;
+      delta = a->range.start - b->range.start;
 
    return delta;
 }
@@ -200,14 +200,6 @@ brw_nir_analyze_ubo_ranges(const struct brw_compiler *compiler,
                            const struct brw_vs_prog_key *vs_key,
                            struct brw_ubo_range out_ranges[4])
 {
-   const struct gen_device_info *devinfo = compiler->devinfo;
-
-   if ((devinfo->gen <= 7 && !devinfo->is_haswell) ||
-       !compiler->scalar_stage[nir->info.stage]) {
-      memset(out_ranges, 0, 4 * sizeof(struct brw_ubo_range));
-      return;
-   }
-
    void *mem_ctx = ralloc_context(NULL);
 
    struct ubo_analysis_state state = {

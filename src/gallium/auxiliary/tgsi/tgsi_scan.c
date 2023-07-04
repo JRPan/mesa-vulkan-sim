@@ -615,12 +615,10 @@ scan_declaration(struct tgsi_shader_info *info,
       case TGSI_FILE_INPUT:
          assert(array_id < ARRAY_SIZE(info->input_array_first));
          info->input_array_first[array_id] = fulldecl->Range.First;
-         info->input_array_last[array_id] = fulldecl->Range.Last;
          break;
       case TGSI_FILE_OUTPUT:
          assert(array_id < ARRAY_SIZE(info->output_array_first));
          info->output_array_first[array_id] = fulldecl->Range.First;
-         info->output_array_last[array_id] = fulldecl->Range.Last;
          break;
       }
       info->array_max[file] = MAX2(info->array_max[file], array_id);
@@ -663,12 +661,15 @@ scan_declaration(struct tgsi_shader_info *info,
          info->shader_buffers_declared |= 1u << reg;
          break;
 
+      case TGSI_FILE_HW_ATOMIC:
+         info->hw_atomic_declared |= 1u << reg;
+         break;
+
       case TGSI_FILE_INPUT:
          info->input_semantic_name[reg] = (ubyte) semName;
          info->input_semantic_index[reg] = (ubyte) semIndex;
          info->input_interpolate[reg] = (ubyte)fulldecl->Interp.Interpolate;
          info->input_interpolate_loc[reg] = (ubyte)fulldecl->Interp.Location;
-         info->input_cylindrical_wrap[reg] = (ubyte)fulldecl->Interp.CylindricalWrap;
 
          /* Vertex shaders can have inputs with holes between them. */
          info->num_inputs = MAX2(info->num_inputs, reg + 1);

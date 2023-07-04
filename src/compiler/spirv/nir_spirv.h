@@ -43,6 +43,7 @@ struct nir_spirv_specialization {
 };
 
 enum nir_spirv_debug_level {
+   NIR_SPIRV_DEBUG_LEVEL_INVALID = -1,
    NIR_SPIRV_DEBUG_LEVEL_INFO,
    NIR_SPIRV_DEBUG_LEVEL_WARNING,
    NIR_SPIRV_DEBUG_LEVEL_ERROR,
@@ -56,11 +57,6 @@ enum nir_spirv_execution_environment {
 
 struct spirv_to_nir_options {
    enum nir_spirv_execution_environment environment;
-
-   /* Whether to make FragCoord to a system value, the same as
-    * GLSLFragCoordIsSysVal in GLSL.
-    */
-   bool frag_coord_is_sysval;
 
    /* Whether to keep ViewIndex as an input instead of rewriting to a sysval.
     */
@@ -79,6 +75,19 @@ struct spirv_to_nir_options {
     */
    uint16_t float_controls_execution_mode;
 
+   /* Initial subgroup size.  This may be overwritten for CL kernels */
+   enum gl_subgroup_size subgroup_size;
+
+   /* True if RelaxedPrecision-decorated ALU result values should be performed
+    * with 16-bit math.
+    */
+   bool mediump_16bit_alu;
+
+   /* When mediump_16bit_alu is set, determines whether nir_op_fddx/fddy can be
+    * performed in 16-bit math.
+    */
+   bool mediump_16bit_derivatives;
+
    struct spirv_supported_capabilities caps;
 
    /* Address format for various kinds of pointers. */
@@ -87,6 +96,7 @@ struct spirv_to_nir_options {
    nir_address_format phys_ssbo_addr_format;
    nir_address_format push_const_addr_format;
    nir_address_format shared_addr_format;
+   nir_address_format task_payload_addr_format;
    nir_address_format global_addr_format;
    nir_address_format temp_addr_format;
    nir_address_format constant_addr_format;
@@ -100,6 +110,9 @@ struct spirv_to_nir_options {
                    const char *message);
       void *private_data;
    } debug;
+
+   /* Force texture sampling to be non-uniform. */
+   bool force_tex_non_uniform;
 };
 
 bool gl_spirv_validation(const uint32_t *words, size_t word_count,

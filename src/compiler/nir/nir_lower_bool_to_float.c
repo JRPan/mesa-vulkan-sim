@@ -67,7 +67,6 @@ lower_alu_instr(nir_builder *b, nir_alu_instr *alu)
    case nir_op_b2f32: alu->op = nir_op_mov; break;
    case nir_op_b2i32: alu->op = nir_op_mov; break;
    case nir_op_f2b1:
-   case nir_op_i2b1:
       rep = nir_sne(b, nir_ssa_for_alu_src(b, alu, 0),
                        nir_imm_float(b, 0));
       break;
@@ -117,7 +116,7 @@ lower_alu_instr(nir_builder *b, nir_alu_instr *alu)
 
    if (rep) {
       /* We've emitted a replacement instruction */
-      nir_ssa_def_rewrite_uses(&alu->dest.dest.ssa, nir_src_for_ssa(rep));
+      nir_ssa_def_rewrite_uses(&alu->dest.dest.ssa, rep);
       nir_instr_remove(&alu->instr);
    } else {
       if (alu->dest.dest.ssa.bit_size == 1)
@@ -128,63 +127,60 @@ lower_alu_instr(nir_builder *b, nir_alu_instr *alu)
 }
 
 static bool
-nir_lower_bool_to_float_impl(nir_function_impl *impl)
+lower_tex_instr(nir_tex_instr *tex)
 {
    bool progress = false;
-
-   nir_builder b;
-   nir_builder_init(&b, impl);
-
-   nir_foreach_block(block, impl) {
-      nir_foreach_instr_safe(instr, block) {
-         switch (instr->type) {
-         case nir_instr_type_alu:
-            progress |= lower_alu_instr(&b, nir_instr_as_alu(instr));
-            break;
-
-         case nir_instr_type_load_const: {
-            nir_load_const_instr *load = nir_instr_as_load_const(instr);
-            if (load->def.bit_size == 1) {
-               nir_const_value *value = load->value;
-               for (unsigned i = 0; i < load->def.num_components; i++)
-                  load->value[i].f32 = value[i].b ? 1.0 : 0.0;
-               load->def.bit_size = 32;
-               progress = true;
-            }
-            break;
-         }
-
-         case nir_instr_type_intrinsic:
-         case nir_instr_type_ssa_undef:
-         case nir_instr_type_phi:
-         case nir_instr_type_tex:
-            nir_foreach_ssa_def(instr, rewrite_1bit_ssa_def_to_32bit,
-                                &progress);
-            break;
-
-         default:
-            nir_foreach_ssa_def(instr, assert_ssa_def_is_not_1bit, NULL);
-         }
-      }
+   rewrite_1bit_ssa_def_to_32bit(&tex->dest.ssa, &progress);
+   if (tex->dest_type == nir_type_bool1) {
+      tex->dest_type = nir_type_bool32;
+      progress = true;
    }
-
-   if (progress) {
-      nir_metadata_preserve(impl, nir_metadata_block_index |
-                                  nir_metadata_dominance);
-   }
-
    return progress;
+}
+
+static bool
+nir_lower_bool_to_float_instr(nir_builder *b,
+                              nir_instr *instr,
+                              UNUSED void *cb_data)
+{
+   switch (instr->type) {
+   case nir_instr_type_alu:
+      return lower_alu_instr(b, nir_instr_as_alu(instr));
+
+   case nir_instr_type_load_const: {
+      nir_load_const_instr *load = nir_instr_as_load_const(instr);
+      if (load->def.bit_size == 1) {
+         nir_const_value *value = load->value;
+         for (unsigned i = 0; i < load->def.num_components; i++)
+            load->value[i].f32 = value[i].b ? 1.0 : 0.0;
+         load->def.bit_size = 32;
+         return true;
+      }
+      return false;
+   }
+
+   case nir_instr_type_intrinsic:
+   case nir_instr_type_ssa_undef:
+   case nir_instr_type_phi: {
+      bool progress = false;
+      nir_foreach_ssa_def(instr, rewrite_1bit_ssa_def_to_32bit, &progress);
+      return progress;
+   }
+
+   case nir_instr_type_tex:
+      return lower_tex_instr(nir_instr_as_tex(instr));
+
+   default:
+      nir_foreach_ssa_def(instr, assert_ssa_def_is_not_1bit, NULL);
+      return false;
+   }
 }
 
 bool
 nir_lower_bool_to_float(nir_shader *shader)
 {
-   bool progress = false;
-
-   nir_foreach_function(function, shader) {
-      if (function->impl && nir_lower_bool_to_float_impl(function->impl))
-         progress = true;
-   }
-
-   return progress;
+   return nir_shader_instructions_pass(shader, nir_lower_bool_to_float_instr,
+                                       nir_metadata_block_index |
+                                       nir_metadata_dominance,
+                                       NULL);
 }

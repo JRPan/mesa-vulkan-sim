@@ -28,6 +28,7 @@
 #include "compiler/glsl/list.h"
 
 #include "main/mtypes.h"
+#include "main/shader_types.h"
 #include "util/ralloc.h"
 
 #include "prog_to_nir.h"
@@ -45,6 +46,7 @@
  */
 
 struct ptn_compile {
+   const struct gl_context *ctx;
    const struct gl_program *prog;
    nir_builder build;
    bool error;
@@ -547,7 +549,7 @@ ptn_tex(struct ptn_compile *c, nir_alu_dest dest, nir_ssa_def **src,
 
    instr = nir_tex_instr_create(b->shader, num_srcs);
    instr->op = op;
-   instr->dest_type = nir_type_float;
+   instr->dest_type = nir_type_float32;
    instr->is_shadow = prog_inst->TexShadow;
 
    bool is_array;
@@ -866,6 +868,16 @@ setup_registers_and_variables(struct ptn_compile *c)
    while (inputs_read) {
       const int i = u_bit_scan64(&inputs_read);
 
+      if (c->ctx->Const.GLSLFragCoordIsSysVal &&
+          shader->info.stage == MESA_SHADER_FRAGMENT &&
+          i == VARYING_SLOT_POS) {
+         nir_variable *var = nir_variable_create(shader, nir_var_system_value, glsl_vec4_type(),
+                                                 "frag_coord");
+         var->data.location = SYSTEM_VALUE_FRAG_COORD;
+         c->input_vars[i] = var;
+         continue;
+      }
+
       nir_variable *var =
          nir_variable_create(shader, nir_var_shader_in, glsl_vec4_type(),
                              ralloc_asprintf(shader, "in_%d", i));
@@ -904,10 +916,8 @@ setup_registers_and_variables(struct ptn_compile *c)
    }
 
    /* Create system value variables */
-   uint64_t system_values_read = c->prog->info.system_values_read;
-   while (system_values_read) {
-      const int i = u_bit_scan64(&system_values_read);
-
+   int i;
+   BITSET_FOREACH_SET(i, c->prog->info.system_values_read, SYSTEM_VALUE_MAX) {
       nir_variable *var =
          nir_variable_create(shader, nir_var_system_value, glsl_vec4_type(),
                              ralloc_asprintf(shader, "sv_%d", i));
@@ -918,7 +928,7 @@ setup_registers_and_variables(struct ptn_compile *c)
    }
 
    /* Create output registers and variables. */
-   int max_outputs = util_last_bit(c->prog->info.outputs_written);
+   int max_outputs = util_last_bit64(c->prog->info.outputs_written);
    c->output_regs = rzalloc_array(c, nir_register *, max_outputs);
 
    uint64_t outputs_written = c->prog->info.outputs_written;
@@ -976,7 +986,7 @@ setup_registers_and_variables(struct ptn_compile *c)
 }
 
 struct nir_shader *
-prog_to_nir(const struct gl_program *prog,
+prog_to_nir(const struct gl_context *ctx, const struct gl_program *prog,
             const nir_shader_compiler_options *options)
 {
    struct ptn_compile *c;
@@ -987,6 +997,7 @@ prog_to_nir(const struct gl_program *prog,
    if (!c)
       return NULL;
    c->prog = prog;
+   c->ctx = ctx;
 
    c->build = nir_builder_init_simple_shader(stage, options, NULL);
 
@@ -1026,6 +1037,8 @@ prog_to_nir(const struct gl_program *prog,
    s->info.clip_distance_array_size = 0;
    s->info.cull_distance_array_size = 0;
    s->info.separate_shader = false;
+   s->info.io_lowered = false;
+   s->info.internal = false;
 
 fail:
    if (c->error) {

@@ -108,7 +108,7 @@ static bool
 value_equals_store_src(struct value *value, nir_intrinsic_instr *intrin)
 {
    assert(intrin->intrinsic == nir_intrinsic_store_deref);
-   uintptr_t write_mask = nir_intrinsic_write_mask(intrin);
+   nir_component_mask_t write_mask = nir_intrinsic_write_mask(intrin);
 
    for (unsigned i = 0; i < intrin->num_components; i++) {
       if ((write_mask & (1 << i)) &&
@@ -185,12 +185,13 @@ gather_vars_written(struct copy_prop_var_state *state,
             break;
 
          case nir_intrinsic_trace_ray:
-         case nir_intrinsic_execute_callable: {
+         case nir_intrinsic_execute_callable:
+         case nir_intrinsic_rt_trace_ray:
+         case nir_intrinsic_rt_execute_callable: {
             nir_deref_instr *payload =
                nir_src_as_deref(*nir_get_shader_call_payload_src(intrin));
 
-            nir_component_mask_t mask =
-               BITFIELD_MASK(glsl_get_vector_elements(payload->type));
+            nir_component_mask_t mask = (1 << glsl_get_vector_elements(payload->type)) - 1;
 
             struct hash_entry *ht_entry =
                _mesa_hash_table_search(written->derefs, payload);
@@ -590,10 +591,10 @@ load_from_ssa_entry_value(struct copy_prop_var_state *state,
       intrin->intrinsic == nir_intrinsic_load_deref ? &intrin->dest.ssa : NULL;
 
    bool keep_intrin = false;
-   nir_ssa_def *comps[NIR_MAX_VEC_COMPONENTS];
+   nir_ssa_scalar comps[NIR_MAX_VEC_COMPONENTS];
    for (unsigned i = 0; i < num_components; i++) {
       if (value->ssa.def[i]) {
-         comps[i] = nir_channel(b, value->ssa.def[i], value->ssa.component[i]);
+         comps[i] = nir_get_ssa_scalar(value->ssa.def[i], value->ssa.component[i]);
       } else {
          /* We don't have anything for this component in our
           * list.  Just re-use a channel from the load.
@@ -604,11 +605,11 @@ load_from_ssa_entry_value(struct copy_prop_var_state *state,
          if (load_def->parent_instr == &intrin->instr)
             keep_intrin = true;
 
-         comps[i] = nir_channel(b, load_def, i);
+         comps[i] = nir_get_ssa_scalar(load_def, i);
       }
    }
 
-   nir_ssa_def *vec = nir_vec(b, comps, num_components);
+   nir_ssa_def *vec = nir_vec_scalars(b, comps, num_components);
    value_set_ssa_components(value, vec, num_components);
 
    if (!keep_intrin) {
@@ -939,7 +940,7 @@ copy_prop_vars_block(struct copy_prop_var_state *state,
             if (vec_index >= vec_comps) {
                b->cursor = nir_instr_remove(instr);
                nir_ssa_def *u = nir_ssa_undef(b, 1, intrin->dest.ssa.bit_size);
-               nir_ssa_def_rewrite_uses(&intrin->dest.ssa, nir_src_for_ssa(u));
+               nir_ssa_def_rewrite_uses(&intrin->dest.ssa, u);
                state->progress = true;
                break;
             }
@@ -964,11 +965,11 @@ copy_prop_vars_block(struct copy_prop_var_state *state,
                    * rewrite the vecN itself.
                    */
                   nir_ssa_def_rewrite_uses_after(&intrin->dest.ssa,
-                                                 nir_src_for_ssa(value.ssa.def[0]),
+                                                 value.ssa.def[0],
                                                  value.ssa.def[0]->parent_instr);
                } else {
                   nir_ssa_def_rewrite_uses(&intrin->dest.ssa,
-                                           nir_src_for_ssa(value.ssa.def[0]));
+                                           value.ssa.def[0]);
                }
             } else {
                /* We're turning it into a load of a different variable */
@@ -1141,13 +1142,14 @@ copy_prop_vars_block(struct copy_prop_var_state *state,
       }
 
       case nir_intrinsic_trace_ray:
-      case nir_intrinsic_execute_callable: {
+      case nir_intrinsic_execute_callable:
+      case nir_intrinsic_rt_trace_ray:
+      case nir_intrinsic_rt_execute_callable: {
          if (debug) dump_instr(instr);
 
          nir_deref_and_path payload = {
             nir_src_as_deref(*nir_get_shader_call_payload_src(intrin)), NULL};
-         nir_component_mask_t full_mask =
-            BITFIELD_MASK(glsl_get_vector_elements(payload.instr->type));
+         nir_component_mask_t full_mask = (1 << glsl_get_vector_elements(payload.instr->type)) - 1;
          kill_aliases(state, copies, &payload, full_mask);
          break;
       }
@@ -1253,6 +1255,9 @@ copy_prop_vars_cf_node(struct copy_prop_var_state *state,
 
       invalidate_copies_for_cf_node(state, copies, cf_node);
 
+      util_dynarray_fini(&then_copies);
+      util_dynarray_fini(&else_copies);
+
       break;
    }
 
@@ -1270,6 +1275,8 @@ copy_prop_vars_cf_node(struct copy_prop_var_state *state,
 
       foreach_list_typed_safe(nir_cf_node, cf_node, node, &loop->body)
          copy_prop_vars_cf_node(state, &loop_copies, cf_node);
+
+      util_dynarray_fini(&loop_copies);
 
       break;
    }

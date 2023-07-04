@@ -26,11 +26,11 @@
 
 #include "compiler/nir/nir_builder.h"
 #include "compiler/glsl/gl_nir.h"
+#include "compiler/glsl/gl_nir_linker.h"
 #include "tgsi/tgsi_parse.h"
 
-struct pipe_shader_state *
-st_nir_finish_builtin_shader(struct st_context *st,
-                             nir_shader *nir)
+void
+st_nir_finish_builtin_nir(struct st_context *st, nir_shader *nir)
 {
    struct pipe_screen *screen = st->screen;
    gl_shader_stage stage = nir->info.stage;
@@ -53,6 +53,11 @@ st_nir_finish_builtin_shader(struct st_context *st,
       NIR_PASS_V(nir, nir_lower_io_to_scalar_early, mask);
    }
 
+   if (st->lower_rect_tex) {
+      const struct nir_lower_tex_options opts = { .lower_rect = true, };
+      NIR_PASS_V(nir, nir_lower_tex, &opts);
+   }
+
    nir_shader_gather_info(nir, nir_shader_get_entrypoint(nir));
 
    st_nir_assign_vs_in_locations(nir);
@@ -63,10 +68,19 @@ st_nir_finish_builtin_shader(struct st_context *st,
    if (!screen->get_param(screen, PIPE_CAP_NIR_IMAGES_AS_DEREF))
       NIR_PASS_V(nir, gl_nir_lower_images, false);
 
-   if (screen->finalize_nir)
-      screen->finalize_nir(screen, nir, true);
-   else
-      st_nir_opts(nir);
+   if (screen->finalize_nir) {
+      char *msg = screen->finalize_nir(screen, nir);
+      free(msg);
+   } else {
+      gl_nir_opts(nir);
+   }
+}
+
+struct pipe_shader_state *
+st_nir_finish_builtin_shader(struct st_context *st,
+                             nir_shader *nir)
+{
+   st_nir_finish_builtin_nir(st, nir);
 
    struct pipe_shader_state state = {
       .type = PIPE_SHADER_IR_NIR,
@@ -120,6 +134,38 @@ st_nir_make_passthrough_shader(struct st_context *st,
 
       nir_copy_var(&b, out, in);
    }
+
+   return st_nir_finish_builtin_shader(st, b.shader);
+}
+
+/**
+ * Make a simple shader that reads color value from a constant buffer
+ * and uses it to clear all color buffers.
+ */
+struct pipe_shader_state *
+st_nir_make_clearcolor_shader(struct st_context *st)
+{
+   const nir_shader_compiler_options *options =
+      st_get_nir_compiler_options(st, MESA_SHADER_FRAGMENT);
+
+   nir_builder b = nir_builder_init_simple_shader(MESA_SHADER_FRAGMENT, options,
+                                                  "clear color FS");
+   b.shader->info.num_ubos = 1;
+   b.shader->num_outputs = 1;
+   b.shader->num_uniforms = 1;
+
+   /* Read clear color from constant buffer */
+   nir_ssa_def *clear_color = nir_load_uniform(&b, 4, 32, nir_imm_int(&b,0),
+                                               .range = 16,
+                                               .dest_type = nir_type_float32);
+
+   nir_variable *color_out =
+      nir_variable_create(b.shader, nir_var_shader_out, glsl_vec_type(4),
+                             "outcolor");
+   color_out->data.location = FRAG_RESULT_COLOR;
+
+   /* Write out the color */
+   nir_store_var(&b, color_out, clear_color, 0xf);
 
    return st_nir_finish_builtin_shader(st, b.shader);
 }

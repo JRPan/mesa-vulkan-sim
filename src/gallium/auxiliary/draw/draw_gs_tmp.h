@@ -16,7 +16,7 @@
       case PIPE_PRIM_QUADS:                                       \
       case PIPE_PRIM_QUAD_STRIP:                                  \
       case PIPE_PRIM_POLYGON:                                     \
-         debug_assert(!"unexpected primitive type in GS");        \
+         assert(!"unexpected primitive type in GS");        \
          return;                                                  \
       default:                                                    \
          break;                                                   \
@@ -28,5 +28,5 @@
 #define TRIANGLE(flags,i0,i1,i2)              gs_tri(gs,i0,i1,i2)
 #define LINE_ADJ(flags,i0,i1,i2,i3)           gs_line_adj(gs,i0,i1,i2,i3)
 #define TRIANGLE_ADJ(flags,i0,i1,i2,i3,i4,i5) gs_tri_adj(gs,i0,i1,i2,i3,i4,i5)
-
+#define QUAD(flags,i0,i1,i2,i3)
 #include "draw_decompose_tmp.h"

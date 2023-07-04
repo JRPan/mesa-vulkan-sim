@@ -103,11 +103,14 @@ D3DWindowBuffer_create(struct NineSwapChain9 *This,
 
     memset(&whandle, 0, sizeof(whandle));
     whandle.type = WINSYS_HANDLE_TYPE_FD;
-    This->screen->resource_get_handle(This->screen, pipe, resource,
-                                      &whandle,
-                                      for_frontbuffer_reading ?
-                                          PIPE_HANDLE_USAGE_FRAMEBUFFER_WRITE :
-                                          PIPE_HANDLE_USAGE_EXPLICIT_FLUSH);
+    if (!This->screen->resource_get_handle(This->screen, pipe, resource,
+                                           &whandle,
+                                           for_frontbuffer_reading ?
+                                               PIPE_HANDLE_USAGE_FRAMEBUFFER_WRITE :
+                                               PIPE_HANDLE_USAGE_EXPLICIT_FLUSH)) {
+        ERR("Failed to get handle for resource\n");
+        return NULL;
+    }
     nine_context_get_pipe_release(This->base.device);
     stride = whandle.stride;
     dmaBufFd = whandle.handle;
@@ -886,7 +889,9 @@ present( struct NineSwapChain9 *This,
         handle_draw_cursor_and_hud(This, resource);
 
     fence = NULL;
-    pipe->flush(pipe, &fence, PIPE_FLUSH_END_OF_FRAME);
+    /* When threadpool is enabled, we don't submit before the fence
+     * tells us rendering was finished, thus we can flush async there */
+    pipe->flush(pipe, &fence, PIPE_FLUSH_END_OF_FRAME | (This->enable_threadpool ? PIPE_FLUSH_ASYNC : 0));
 
     /* Present now for thread_submit, because we have the fence.
      * It's possible we return WASSTILLDRAWING and still Present,
@@ -930,6 +935,8 @@ bypass_rendering:
         if (FAILED(hr)) { UNTESTED(3);return hr; }
     }
 
+    This->base.device->end_scene_since_present = 0;
+    This->base.device->frame_count++;
     return D3D_OK;
 }
 
@@ -1311,6 +1318,9 @@ NineSwapChain9_GetBackBufferCountForParams( struct NineSwapChain9 *This,
              * because in case a pageflip is missed because rendering wasn't finished,
              * the Xserver will hold 4 buffers. */
             else if (!This->actx->thread_submit && count < 5)
+                count = 5;
+            /* Somehow this cases needs 5 with thread_submit, or else you get a small performance hit */
+            if (This->actx->tearfree_discard && count < 5)
                 count = 5;
         }
     }

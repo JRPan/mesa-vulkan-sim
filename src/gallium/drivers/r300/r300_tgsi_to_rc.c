@@ -30,6 +30,8 @@
 #include "tgsi/tgsi_scan.h"
 #include "tgsi/tgsi_util.h"
 
+#include "util/compiler.h"
+
 static unsigned translate_opcode(unsigned opcode)
 {
     switch(opcode) {
@@ -135,7 +137,7 @@ static unsigned translate_register_file(unsigned file)
         case TGSI_FILE_OUTPUT: return RC_FILE_OUTPUT;
         default:
             fprintf(stderr, "Unhandled register file: %i\n", file);
-            /* fall-through */
+            FALLTHROUGH;
         case TGSI_FILE_TEMPORARY: return RC_FILE_TEMPORARY;
         case TGSI_FILE_ADDRESS: return RC_FILE_ADDRESS;
     }
@@ -173,8 +175,6 @@ static void transform_srcreg(
     struct rc_src_register * dst,
     struct tgsi_full_src_register * src)
 {
-    unsigned i, j;
-
     dst->File = translate_register_file(src->Register.File);
     dst->Index = translate_register_index(ttr, src->Register.File, src->Register.Index);
     dst->RelAddr = src->Register.Indirect;
@@ -184,21 +184,6 @@ static void transform_srcreg(
     dst->Swizzle |= tgsi_util_get_full_src_register_swizzle(src, 3) << 9;
     dst->Abs = src->Register.Absolute;
     dst->Negate = src->Register.Negate ? RC_MASK_XYZW : 0;
-
-    if (src->Register.File == TGSI_FILE_IMMEDIATE) {
-        for (i = 0; i < ttr->imms_to_swizzle_count; i++) {
-            if (ttr->imms_to_swizzle[i].index == src->Register.Index) {
-                dst->File = RC_FILE_TEMPORARY;
-                dst->Index = 0;
-                dst->Swizzle = 0;
-                for (j = 0; j < 4; j++) {
-                    dst->Swizzle |= GET_SWZ(ttr->imms_to_swizzle[i].swizzle,
-                        tgsi_util_get_full_src_register_swizzle(src, j)) << (j * 3);
-                }
-                break;
-            }
-        }
-    }
 }
 
 static void transform_texture(struct rc_instruction * dst, struct tgsi_instruction_texture src,
@@ -223,17 +208,38 @@ static void transform_texture(struct rc_instruction * dst, struct tgsi_instructi
         case TGSI_TEXTURE_SHADOW1D:
             dst->U.I.TexSrcTarget = RC_TEXTURE_1D;
             dst->U.I.TexShadow = 1;
-            *shadowSamplers |= 1 << dst->U.I.TexSrcUnit;
+            *shadowSamplers |= 1U << dst->U.I.TexSrcUnit;
             break;
         case TGSI_TEXTURE_SHADOW2D:
             dst->U.I.TexSrcTarget = RC_TEXTURE_2D;
             dst->U.I.TexShadow = 1;
-            *shadowSamplers |= 1 << dst->U.I.TexSrcUnit;
+            *shadowSamplers |= 1U << dst->U.I.TexSrcUnit;
             break;
         case TGSI_TEXTURE_SHADOWRECT:
             dst->U.I.TexSrcTarget = RC_TEXTURE_RECT;
             dst->U.I.TexShadow = 1;
-            *shadowSamplers |= 1 << dst->U.I.TexSrcUnit;
+            *shadowSamplers |= 1U << dst->U.I.TexSrcUnit;
+            break;
+        case TGSI_TEXTURE_1D_ARRAY:
+            dst->U.I.TexSrcTarget = RC_TEXTURE_1D_ARRAY;
+            break;
+        case TGSI_TEXTURE_2D_ARRAY:
+            dst->U.I.TexSrcTarget = RC_TEXTURE_2D_ARRAY;
+            break;
+        case TGSI_TEXTURE_SHADOW1D_ARRAY:
+            dst->U.I.TexSrcTarget = RC_TEXTURE_1D_ARRAY;
+            dst->U.I.TexShadow = 1;
+            *shadowSamplers |= 1U << dst->U.I.TexSrcUnit;
+            break;
+        case TGSI_TEXTURE_SHADOW2D_ARRAY:
+            dst->U.I.TexSrcTarget = RC_TEXTURE_2D_ARRAY;
+            dst->U.I.TexShadow = 1;
+            *shadowSamplers |= 1U << dst->U.I.TexSrcUnit;
+            break;
+        case TGSI_TEXTURE_SHADOWCUBE:
+            dst->U.I.TexSrcTarget = RC_TEXTURE_CUBE;
+            dst->U.I.TexShadow = 1;
+            *shadowSamplers |= 1U << dst->U.I.TexSrcUnit;
             break;
     }
     dst->U.I.TexSwizzle = RC_SWIZZLE_XYZW;
@@ -246,6 +252,15 @@ static void transform_instruction(struct tgsi_to_rc * ttr, struct tgsi_full_inst
 
     dst = rc_insert_new_instruction(ttr->compiler, ttr->compiler->Program.Instructions.Prev);
     dst->U.I.Opcode = translate_opcode(src->Instruction.Opcode);
+    if (!ttr->compiler->is_r500 && dst->U.I.Opcode == RC_OPCODE_BGNLOOP && ttr->error == FALSE) {
+        ttr->error = TRUE;
+        fprintf(stderr, "r300: Dynamic loops are not supported on R3xx/R4xx.\n");
+    }
+    if (!ttr->compiler->is_r500 && dst->U.I.Opcode == RC_OPCODE_IF && ttr->error == FALSE) {
+        ttr->error = TRUE;
+        fprintf(stderr, "r300: Branches are not supported on R3xx/R4xx.\n");
+    }
+
     dst->U.I.SaturateMode = translate_saturate(src->Instruction.Saturate);
 
     if (src->Instruction.NumDstRegs)
@@ -269,34 +284,12 @@ static void handle_immediate(struct tgsi_to_rc * ttr,
                              unsigned index)
 {
     struct rc_constant constant;
-    unsigned swizzle = 0;
-    boolean can_swizzle = TRUE;
-    unsigned i;
 
-    for (i = 0; i < 4; i++) {
-        if (imm->u[i].Float == 0.0f) {
-            swizzle |= RC_SWIZZLE_ZERO << (i * 3);
-        } else if (imm->u[i].Float == 0.5f && ttr->use_half_swizzles) {
-            swizzle |= RC_SWIZZLE_HALF << (i * 3);
-        } else if (imm->u[i].Float == 1.0f) {
-            swizzle |= RC_SWIZZLE_ONE << (i * 3);
-        } else {
-            can_swizzle = FALSE;
-            break;
-        }
-    }
-
-    if (can_swizzle) {
-        ttr->imms_to_swizzle[ttr->imms_to_swizzle_count].index = index;
-        ttr->imms_to_swizzle[ttr->imms_to_swizzle_count].swizzle = swizzle;
-        ttr->imms_to_swizzle_count++;
-    } else {
-        constant.Type = RC_CONSTANT_IMMEDIATE;
-        constant.Size = 4;
-        for(i = 0; i < 4; ++i)
-            constant.u.Immediate[i] = imm->u[i].Float;
-        rc_constants_add(&ttr->compiler->Program.Constants, &constant);
-    }
+    constant.Type = RC_CONSTANT_IMMEDIATE;
+    constant.Size = 4;
+    for (unsigned i = 0; i < 4; ++i)
+        constant.u.Immediate[i] = imm->u[i].Float;
+    rc_constants_add(&ttr->compiler->Program.Constants, &constant);
 }
 
 void r300_tgsi_to_rc(struct tgsi_to_rc * ttr,
@@ -323,9 +316,6 @@ void r300_tgsi_to_rc(struct tgsi_to_rc * ttr,
 
     ttr->immediate_offset = ttr->compiler->Program.Constants.Count;
 
-    ttr->imms_to_swizzle = malloc(ttr->info->immediate_count * sizeof(struct swizzled_imms));
-    ttr->imms_to_swizzle_count = 0;
-
     tgsi_parse_init(&parser, tokens);
 
     while (!tgsi_parse_end_of_tokens(&parser)) {
@@ -350,8 +340,6 @@ void r300_tgsi_to_rc(struct tgsi_to_rc * ttr,
     }
 
     tgsi_parse_free(&parser);
-
-    free(ttr->imms_to_swizzle);
 
     rc_calculate_inputs_outputs(ttr->compiler);
 }

@@ -42,6 +42,8 @@
 #include <assert.h>
 #include <inttypes.h>
 
+DEBUG_GET_ONCE_BOOL_OPTION(color, "AMD_COLOR", true);
+
 /* Parsed IBs are difficult to read without colors. Use "less -R file" to
  * read them, or use "aha -b -f file" to convert them to html.
  */
@@ -51,6 +53,12 @@
 #define COLOR_YELLOW "\033[1;33m"
 #define COLOR_CYAN   "\033[1;36m"
 
+#define O_COLOR_RESET  (debug_get_option_color() ? COLOR_RESET : "")
+#define O_COLOR_RED    (debug_get_option_color() ? COLOR_RED : "")
+#define O_COLOR_GREEN  (debug_get_option_color() ? COLOR_GREEN : "")
+#define O_COLOR_YELLOW (debug_get_option_color() ? COLOR_YELLOW : "")
+#define O_COLOR_CYAN   (debug_get_option_color() ? COLOR_CYAN : "")
+
 #define INDENT_PKT 8
 
 struct ac_ib_parser {
@@ -59,7 +67,8 @@ struct ac_ib_parser {
    unsigned num_dw;
    const int *trace_ids;
    unsigned trace_id_count;
-   enum chip_class chip_class;
+   enum amd_gfx_level gfx_level;
+   enum radeon_family family;
    ac_debug_addr_callback addr_callback;
    void *addr_callback_data;
 
@@ -95,16 +104,23 @@ static void print_value(FILE *file, uint32_t value, int bits)
 static void print_named_value(FILE *file, const char *name, uint32_t value, int bits)
 {
    print_spaces(file, INDENT_PKT);
-   fprintf(file, COLOR_YELLOW "%s" COLOR_RESET " <- ", name);
+   fprintf(file, "%s%s%s <- ",
+           O_COLOR_YELLOW, name,
+           O_COLOR_RESET);
    print_value(file, value, bits);
 }
 
-static const struct si_reg *find_register(enum chip_class chip_class, unsigned offset)
+static const struct si_reg *find_register(enum amd_gfx_level gfx_level, enum radeon_family family,
+                                          unsigned offset)
 {
    const struct si_reg *table;
    unsigned table_size;
 
-   switch (chip_class) {
+   switch (gfx_level) {
+   case GFX11:
+      table = gfx11_reg_table;
+      table_size = ARRAY_SIZE(gfx11_reg_table);
+      break;
    case GFX10_3:
    case GFX10:
       table = gfx10_reg_table;
@@ -115,6 +131,11 @@ static const struct si_reg *find_register(enum chip_class chip_class, unsigned o
       table_size = ARRAY_SIZE(gfx9_reg_table);
       break;
    case GFX8:
+      if (family == CHIP_STONEY) {
+         table = gfx81_reg_table;
+         table_size = ARRAY_SIZE(gfx81_reg_table);
+         break;
+      }
       table = gfx8_reg_table;
       table_size = ARRAY_SIZE(gfx8_reg_table);
       break;
@@ -140,24 +161,27 @@ static const struct si_reg *find_register(enum chip_class chip_class, unsigned o
    return NULL;
 }
 
-const char *ac_get_register_name(enum chip_class chip_class, unsigned offset)
+const char *ac_get_register_name(enum amd_gfx_level gfx_level, enum radeon_family family,
+                                 unsigned offset)
 {
-   const struct si_reg *reg = find_register(chip_class, offset);
+   const struct si_reg *reg = find_register(gfx_level, family, offset);
 
    return reg ? sid_strings + reg->name_offset : "(no name)";
 }
 
-void ac_dump_reg(FILE *file, enum chip_class chip_class, unsigned offset, uint32_t value,
-                 uint32_t field_mask)
+void ac_dump_reg(FILE *file, enum amd_gfx_level gfx_level, enum radeon_family family,
+                 unsigned offset, uint32_t value, uint32_t field_mask)
 {
-   const struct si_reg *reg = find_register(chip_class, offset);
+   const struct si_reg *reg = find_register(gfx_level, family, offset);
 
    if (reg) {
       const char *reg_name = sid_strings + reg->name_offset;
       bool first_field = true;
 
       print_spaces(file, INDENT_PKT);
-      fprintf(file, COLOR_YELLOW "%s" COLOR_RESET " <- ", reg_name);
+      fprintf(file, "%s%s%s <- ",
+              O_COLOR_YELLOW, reg_name,
+              O_COLOR_RESET);
 
       if (!reg->num_fields) {
          print_value(file, value, 32);
@@ -190,7 +214,9 @@ void ac_dump_reg(FILE *file, enum chip_class chip_class, unsigned offset, uint32
    }
 
    print_spaces(file, INDENT_PKT);
-   fprintf(file, COLOR_YELLOW "0x%05x" COLOR_RESET " <- 0x%08x\n", offset, value);
+   fprintf(file, "%s0x%05x%s <- 0x%08x\n",
+           O_COLOR_YELLOW, offset,
+           O_COLOR_RESET, value);
 }
 
 static uint32_t ac_ib_get(struct ac_ib_parser *ib)
@@ -208,7 +234,8 @@ static uint32_t ac_ib_get(struct ac_ib_parser *ib)
        * and radeon_emit is performance sensitive...
        */
       if (VALGRIND_CHECK_VALUE_IS_DEFINED(v))
-         fprintf(ib->f, COLOR_RED "Valgrind: The next DWORD is garbage" COLOR_RESET "\n");
+         fprintf(ib->f, "%sValgrind: The next DWORD is garbage%s\n",
+                 debug_get_option_color() ? COLOR_RED : "", O_COLOR_RESET);
 #endif
       fprintf(ib->f, "\n\035#%08x ", v);
    } else {
@@ -233,7 +260,7 @@ static void ac_parse_set_reg_packet(FILE *f, unsigned count, unsigned reg_offset
    }
 
    for (i = 0; i < count; i++)
-      ac_dump_reg(f, ib->chip_class, reg + i * 4, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, reg + i * 4, ac_ib_get(ib), ~0);
 }
 
 static void ac_parse_packet3(FILE *f, uint32_t header, struct ac_ib_parser *ib,
@@ -254,12 +281,12 @@ static void ac_parse_packet3(FILE *f, uint32_t header, struct ac_ib_parser *ib,
       const char *name = sid_strings + packet3_table[i].name_offset;
 
       if (op == PKT3_SET_CONTEXT_REG || op == PKT3_SET_CONFIG_REG || op == PKT3_SET_UCONFIG_REG ||
-          op == PKT3_SET_UCONFIG_REG_INDEX || op == PKT3_SET_SH_REG)
-         fprintf(f, COLOR_CYAN "%s%s" COLOR_CYAN ":\n", name, predicate);
+          op == PKT3_SET_UCONFIG_REG_INDEX || op == PKT3_SET_SH_REG || op == PKT3_SET_SH_REG_INDEX)
+         fprintf(f, "%s%s%s%s:\n", O_COLOR_CYAN, name, predicate, O_COLOR_RESET);
       else
-         fprintf(f, COLOR_GREEN "%s%s" COLOR_RESET ":\n", name, predicate);
+         fprintf(f, "%s%s%s%s:\n", O_COLOR_GREEN, name, predicate, O_COLOR_RESET);
    } else
-      fprintf(f, COLOR_RED "PKT3_UNKNOWN 0x%x%s" COLOR_RESET ":\n", op, predicate);
+      fprintf(f, "%sPKT3_UNKNOWN 0x%x%s%s:\n", O_COLOR_RED, op, predicate, O_COLOR_RESET);
 
    /* Print the contents. */
    switch (op) {
@@ -274,33 +301,44 @@ static void ac_parse_packet3(FILE *f, uint32_t header, struct ac_ib_parser *ib,
       ac_parse_set_reg_packet(f, count, CIK_UCONFIG_REG_OFFSET, ib);
       break;
    case PKT3_SET_SH_REG:
+   case PKT3_SET_SH_REG_INDEX:
       ac_parse_set_reg_packet(f, count, SI_SH_REG_OFFSET, ib);
       break;
    case PKT3_ACQUIRE_MEM:
-      ac_dump_reg(f, ib->chip_class, R_0301F0_CP_COHER_CNTL, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_0301F4_CP_COHER_SIZE, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_030230_CP_COHER_SIZE_HI, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_0301F8_CP_COHER_BASE, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_0301E4_CP_COHER_BASE_HI, ac_ib_get(ib), ~0);
+      if (ib->gfx_level >= GFX11 && G_585_PWS_ENA(ib->ib[ib->cur_dw + 5])) {
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_580_ACQUIRE_MEM_PWS_2, ac_ib_get(ib), ~0);
+         print_named_value(f, "GCR_SIZE", ac_ib_get(ib), 32);
+         print_named_value(f, "GCR_SIZE_HI", ac_ib_get(ib), 25);
+         print_named_value(f, "GCR_BASE_LO", ac_ib_get(ib), 32);
+         print_named_value(f, "GCR_BASE_HI", ac_ib_get(ib), 32);
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_585_ACQUIRE_MEM_PWS_7, ac_ib_get(ib), ~0);
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_586_GCR_CNTL, ac_ib_get(ib), ~0);
+         break;
+      }
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_0301F0_CP_COHER_CNTL, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_0301F4_CP_COHER_SIZE, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_030230_CP_COHER_SIZE_HI, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_0301F8_CP_COHER_BASE, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_0301E4_CP_COHER_BASE_HI, ac_ib_get(ib), ~0);
       print_named_value(f, "POLL_INTERVAL", ac_ib_get(ib), 16);
-      if (ib->chip_class >= GFX10)
-         ac_dump_reg(f, ib->chip_class, R_586_GCR_CNTL, ac_ib_get(ib), ~0);
+      if (ib->gfx_level >= GFX10)
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_586_GCR_CNTL, ac_ib_get(ib), ~0);
       break;
    case PKT3_SURFACE_SYNC:
-      if (ib->chip_class >= GFX7) {
-         ac_dump_reg(f, ib->chip_class, R_0301F0_CP_COHER_CNTL, ac_ib_get(ib), ~0);
-         ac_dump_reg(f, ib->chip_class, R_0301F4_CP_COHER_SIZE, ac_ib_get(ib), ~0);
-         ac_dump_reg(f, ib->chip_class, R_0301F8_CP_COHER_BASE, ac_ib_get(ib), ~0);
+      if (ib->gfx_level >= GFX7) {
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_0301F0_CP_COHER_CNTL, ac_ib_get(ib), ~0);
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_0301F4_CP_COHER_SIZE, ac_ib_get(ib), ~0);
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_0301F8_CP_COHER_BASE, ac_ib_get(ib), ~0);
       } else {
-         ac_dump_reg(f, ib->chip_class, R_0085F0_CP_COHER_CNTL, ac_ib_get(ib), ~0);
-         ac_dump_reg(f, ib->chip_class, R_0085F4_CP_COHER_SIZE, ac_ib_get(ib), ~0);
-         ac_dump_reg(f, ib->chip_class, R_0085F8_CP_COHER_BASE, ac_ib_get(ib), ~0);
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_0085F0_CP_COHER_CNTL, ac_ib_get(ib), ~0);
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_0085F4_CP_COHER_SIZE, ac_ib_get(ib), ~0);
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_0085F8_CP_COHER_BASE, ac_ib_get(ib), ~0);
       }
       print_named_value(f, "POLL_INTERVAL", ac_ib_get(ib), 16);
       break;
    case PKT3_EVENT_WRITE: {
       uint32_t event_dw = ac_ib_get(ib);
-      ac_dump_reg(f, ib->chip_class, R_028A90_VGT_EVENT_INITIATOR, event_dw,
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_028A90_VGT_EVENT_INITIATOR, event_dw,
                   S_028A90_EVENT_TYPE(~0));
       print_named_value(f, "EVENT_INDEX", (event_dw >> 8) & 0xf, 4);
       print_named_value(f, "INV_L2", (event_dw >> 20) & 0x1, 1);
@@ -312,7 +350,7 @@ static void ac_parse_packet3(FILE *f, uint32_t header, struct ac_ib_parser *ib,
    }
    case PKT3_EVENT_WRITE_EOP: {
       uint32_t event_dw = ac_ib_get(ib);
-      ac_dump_reg(f, ib->chip_class, R_028A90_VGT_EVENT_INITIATOR, event_dw,
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_028A90_VGT_EVENT_INITIATOR, event_dw,
                   S_028A90_EVENT_TYPE(~0));
       print_named_value(f, "EVENT_INDEX", (event_dw >> 8) & 0xf, 4);
       print_named_value(f, "TCL1_VOL_ACTION_ENA", (event_dw >> 12) & 0x1, 1);
@@ -332,10 +370,10 @@ static void ac_parse_packet3(FILE *f, uint32_t header, struct ac_ib_parser *ib,
    }
    case PKT3_RELEASE_MEM: {
       uint32_t event_dw = ac_ib_get(ib);
-      if (ib->chip_class >= GFX10) {
-         ac_dump_reg(f, ib->chip_class, R_490_RELEASE_MEM_OP, event_dw, ~0u);
+      if (ib->gfx_level >= GFX10) {
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_490_RELEASE_MEM_OP, event_dw, ~0u);
       } else {
-         ac_dump_reg(f, ib->chip_class, R_028A90_VGT_EVENT_INITIATOR, event_dw,
+         ac_dump_reg(f, ib->gfx_level, ib->family, R_028A90_VGT_EVENT_INITIATOR, event_dw,
                      S_028A90_EVENT_TYPE(~0));
          print_named_value(f, "EVENT_INDEX", (event_dw >> 8) & 0xf, 4);
          print_named_value(f, "TCL1_VOL_ACTION_ENA", (event_dw >> 12) & 0x1, 1);
@@ -367,52 +405,52 @@ static void ac_parse_packet3(FILE *f, uint32_t header, struct ac_ib_parser *ib,
       print_named_value(f, "POLL_INTERVAL", ac_ib_get(ib), 16);
       break;
    case PKT3_DRAW_INDEX_AUTO:
-      ac_dump_reg(f, ib->chip_class, R_030930_VGT_NUM_INDICES, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_0287F0_VGT_DRAW_INITIATOR, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_030930_VGT_NUM_INDICES, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_0287F0_VGT_DRAW_INITIATOR, ac_ib_get(ib), ~0);
       break;
    case PKT3_DRAW_INDEX_2:
-      ac_dump_reg(f, ib->chip_class, R_028A78_VGT_DMA_MAX_SIZE, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_0287E8_VGT_DMA_BASE, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_0287E4_VGT_DMA_BASE_HI, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_030930_VGT_NUM_INDICES, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_0287F0_VGT_DRAW_INITIATOR, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_028A78_VGT_DMA_MAX_SIZE, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_0287E8_VGT_DMA_BASE, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_0287E4_VGT_DMA_BASE_HI, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_030930_VGT_NUM_INDICES, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_0287F0_VGT_DRAW_INITIATOR, ac_ib_get(ib), ~0);
       break;
    case PKT3_INDEX_TYPE:
-      ac_dump_reg(f, ib->chip_class, R_028A7C_VGT_DMA_INDEX_TYPE, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_028A7C_VGT_DMA_INDEX_TYPE, ac_ib_get(ib), ~0);
       break;
    case PKT3_NUM_INSTANCES:
-      ac_dump_reg(f, ib->chip_class, R_030934_VGT_NUM_INSTANCES, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_030934_VGT_NUM_INSTANCES, ac_ib_get(ib), ~0);
       break;
    case PKT3_WRITE_DATA:
-      ac_dump_reg(f, ib->chip_class, R_370_CONTROL, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_371_DST_ADDR_LO, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_372_DST_ADDR_HI, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_370_CONTROL, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_371_DST_ADDR_LO, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_372_DST_ADDR_HI, ac_ib_get(ib), ~0);
       /* The payload is written automatically */
       break;
    case PKT3_CP_DMA:
-      ac_dump_reg(f, ib->chip_class, R_410_CP_DMA_WORD0, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_411_CP_DMA_WORD1, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_412_CP_DMA_WORD2, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_413_CP_DMA_WORD3, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_414_COMMAND, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_410_CP_DMA_WORD0, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_411_CP_DMA_WORD1, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_412_CP_DMA_WORD2, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_413_CP_DMA_WORD3, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_415_COMMAND, ac_ib_get(ib), ~0);
       break;
    case PKT3_DMA_DATA:
-      ac_dump_reg(f, ib->chip_class, R_500_DMA_DATA_WORD0, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_501_SRC_ADDR_LO, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_502_SRC_ADDR_HI, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_503_DST_ADDR_LO, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_504_DST_ADDR_HI, ac_ib_get(ib), ~0);
-      ac_dump_reg(f, ib->chip_class, R_414_COMMAND, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_500_DMA_DATA_WORD0, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_501_SRC_ADDR_LO, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_502_SRC_ADDR_HI, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_503_DST_ADDR_LO, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_504_DST_ADDR_HI, ac_ib_get(ib), ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_415_COMMAND, ac_ib_get(ib), ~0);
       break;
    case PKT3_INDIRECT_BUFFER_SI:
    case PKT3_INDIRECT_BUFFER_CONST:
    case PKT3_INDIRECT_BUFFER_CIK: {
       uint32_t base_lo_dw = ac_ib_get(ib);
-      ac_dump_reg(f, ib->chip_class, R_3F0_IB_BASE_LO, base_lo_dw, ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_3F0_IB_BASE_LO, base_lo_dw, ~0);
       uint32_t base_hi_dw = ac_ib_get(ib);
-      ac_dump_reg(f, ib->chip_class, R_3F1_IB_BASE_HI, base_hi_dw, ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_3F1_IB_BASE_HI, base_hi_dw, ~0);
       uint32_t control_dw = ac_ib_get(ib);
-      ac_dump_reg(f, ib->chip_class, R_3F2_IB_CONTROL, control_dw, ~0);
+      ac_dump_reg(f, ib->gfx_level, ib->family, R_3F2_IB_CONTROL, control_dw, ~0);
 
       if (!ib->addr_callback)
          break;
@@ -459,7 +497,7 @@ static void ac_parse_packet3(FILE *f, uint32_t header, struct ac_ib_parser *ib,
          unsigned packet_id = AC_GET_TRACE_POINT_ID(ib->ib[ib->cur_dw]);
 
          print_spaces(f, INDENT_PKT);
-         fprintf(f, COLOR_RED "Trace point ID: %u\n", packet_id);
+         fprintf(f, "%sTrace point ID: %u%s\n", O_COLOR_RED, packet_id, O_COLOR_RESET);
 
          if (!ib->trace_id_count)
             break; /* tracing was disabled */
@@ -467,17 +505,22 @@ static void ac_parse_packet3(FILE *f, uint32_t header, struct ac_ib_parser *ib,
          *current_trace_id = packet_id;
 
          print_spaces(f, INDENT_PKT);
-         if (packet_id < *ib->trace_ids)
-            fprintf(f, COLOR_RED "This trace point was reached by the CP." COLOR_RESET "\n");
-         else if (packet_id == *ib->trace_ids)
-            fprintf(f, COLOR_RED "!!!!! This is the last trace point that "
-                                 "was reached by the CP !!!!!" COLOR_RESET "\n");
-         else if (packet_id + 1 == *ib->trace_ids)
-            fprintf(f, COLOR_RED "!!!!! This is the first trace point that "
-                                 "was NOT been reached by the CP !!!!!" COLOR_RESET "\n");
-         else
-            fprintf(f, COLOR_RED "!!!!! This trace point was NOT reached "
-                                 "by the CP !!!!!" COLOR_RESET "\n");
+         if (packet_id < *ib->trace_ids) {
+            fprintf(f, "%sThis trace point was reached by the CP.%s\n",
+                    O_COLOR_RED, O_COLOR_RESET);
+         } else if (packet_id == *ib->trace_ids) {
+            fprintf(f, "%s!!!!! This is the last trace point that "
+                                 "was reached by the CP !!!!!%s\n",
+                    O_COLOR_RED, O_COLOR_RESET);
+         } else if (packet_id + 1 == *ib->trace_ids) {
+            fprintf(f, "%s!!!!! This is the first trace point that "
+                                 "was NOT been reached by the CP !!!!!%s\n",
+                    O_COLOR_RED, O_COLOR_RESET);
+         } else {
+            fprintf(f, "%s!!!!! This trace point was NOT reached "
+                                 "by the CP !!!!!%s\n",
+                    O_COLOR_RED, O_COLOR_RESET);
+         }
          break;
       }
       break;
@@ -488,7 +531,8 @@ static void ac_parse_packet3(FILE *f, uint32_t header, struct ac_ib_parser *ib,
       ac_ib_get(ib);
 
    if (ib->cur_dw > first_dw + count + 1)
-      fprintf(f, COLOR_RED "\n!!!!! count in header too low !!!!!" COLOR_RESET "\n");
+      fprintf(f, "%s !!!!! count in header too low !!!!!%s\n",
+              O_COLOR_RED, O_COLOR_RESET);
 }
 
 /**
@@ -509,7 +553,8 @@ static void ac_do_parse_ib(FILE *f, struct ac_ib_parser *ib)
       case 2:
          /* type-2 nop */
          if (header == 0x80000000) {
-            fprintf(f, COLOR_GREEN "NOP (type 2)" COLOR_RESET "\n");
+            fprintf(f, "%sNOP (type 2)%s\n",
+                    O_COLOR_GREEN, O_COLOR_RESET);
             break;
          }
          FALLTHROUGH;
@@ -563,7 +608,7 @@ static void format_ib_output(FILE *f, char *out)
  * \param f            file
  * \param ib_ptr       IB
  * \param num_dw       size of the IB
- * \param chip_class   chip class
+ * \param gfx_level   gfx level
  * \param trace_ids	the last trace IDs that are known to have been reached
  *			and executed by the CP, typically read from a buffer
  * \param trace_id_count The number of entries in the trace_ids array.
@@ -572,7 +617,8 @@ static void format_ib_output(FILE *f, char *out)
  * \param addr_callback_data user data for addr_callback
  */
 void ac_parse_ib_chunk(FILE *f, uint32_t *ib_ptr, int num_dw, const int *trace_ids,
-                       unsigned trace_id_count, enum chip_class chip_class,
+                       unsigned trace_id_count, enum amd_gfx_level gfx_level,
+                       enum radeon_family family,
                        ac_debug_addr_callback addr_callback, void *addr_callback_data)
 {
    struct ac_ib_parser ib = {0};
@@ -580,7 +626,8 @@ void ac_parse_ib_chunk(FILE *f, uint32_t *ib_ptr, int num_dw, const int *trace_i
    ib.num_dw = num_dw;
    ib.trace_ids = trace_ids;
    ib.trace_id_count = trace_id_count;
-   ib.chip_class = chip_class;
+   ib.gfx_level = gfx_level;
+   ib.family = family;
    ib.addr_callback = addr_callback;
    ib.addr_callback_data = addr_callback_data;
 
@@ -610,7 +657,7 @@ void ac_parse_ib_chunk(FILE *f, uint32_t *ib_ptr, int num_dw, const int *trace_i
  * \param f		file
  * \param ib		IB
  * \param num_dw	size of the IB
- * \param chip_class	chip class
+ * \param gfx_level	gfx level
  * \param trace_ids	the last trace IDs that are known to have been reached
  *			and executed by the CP, typically read from a buffer
  * \param trace_id_count The number of entries in the trace_ids array.
@@ -619,12 +666,12 @@ void ac_parse_ib_chunk(FILE *f, uint32_t *ib_ptr, int num_dw, const int *trace_i
  * \param addr_callback_data user data for addr_callback
  */
 void ac_parse_ib(FILE *f, uint32_t *ib, int num_dw, const int *trace_ids, unsigned trace_id_count,
-                 const char *name, enum chip_class chip_class, ac_debug_addr_callback addr_callback,
-                 void *addr_callback_data)
+                 const char *name, enum amd_gfx_level gfx_level, enum radeon_family family,
+                 ac_debug_addr_callback addr_callback, void *addr_callback_data)
 {
    fprintf(f, "------------------ %s begin ------------------\n", name);
 
-   ac_parse_ib_chunk(f, ib, num_dw, trace_ids, trace_id_count, chip_class, addr_callback,
+   ac_parse_ib_chunk(f, ib, num_dw, trace_ids, trace_id_count, gfx_level, family, addr_callback,
                      addr_callback_data);
 
    fprintf(f, "------------------- %s end -------------------\n\n", name);
@@ -633,11 +680,11 @@ void ac_parse_ib(FILE *f, uint32_t *ib, int num_dw, const int *trace_ids, unsign
 /**
  * Parse dmesg and return TRUE if a VM fault has been detected.
  *
- * \param chip_class		chip class
+ * \param gfx_level		gfx level
  * \param old_dmesg_timestamp	previous dmesg timestamp parsed at init time
  * \param out_addr		detected VM fault addr
  */
-bool ac_vm_fault_occured(enum chip_class chip_class, uint64_t *old_dmesg_timestamp,
+bool ac_vm_fault_occured(enum amd_gfx_level gfx_level, uint64_t *old_dmesg_timestamp,
                          uint64_t *out_addr)
 {
 #ifdef _WIN32
@@ -695,7 +742,7 @@ bool ac_vm_fault_occured(enum chip_class chip_class, uint64_t *old_dmesg_timesta
 
       const char *header_line, *addr_line_prefix, *addr_line_format;
 
-      if (chip_class >= GFX9) {
+      if (gfx_level >= GFX9) {
          /* Match this:
           * ..: [gfxhub] VMC page fault (src_id:0 ring:158 vm_id:2 pas_id:0)
           * ..:   at page 0x0000000219f8f000 from 27
@@ -775,7 +822,7 @@ static int compare_wave(const void *p1, const void *p2)
 }
 
 /* Return wave information. "waves" should be a large enough array. */
-unsigned ac_get_wave_info(enum chip_class chip_class,
+unsigned ac_get_wave_info(enum amd_gfx_level gfx_level,
                           struct ac_wave_info waves[AC_MAX_WAVES_PER_CHIP])
 {
 #ifdef _WIN32
@@ -784,7 +831,7 @@ unsigned ac_get_wave_info(enum chip_class chip_class,
    char line[2000], cmd[128];
    unsigned num_waves = 0;
 
-   sprintf(cmd, "umr -O halt_waves -wa %s", chip_class >= GFX10 ? "gfx_0.0.0" : "gfx");
+   sprintf(cmd, "umr -O halt_waves -wa %s", gfx_level >= GFX10 ? "gfx_0.0.0" : "gfx");
 
    FILE *p = popen(cmd, "r");
    if (!p)
