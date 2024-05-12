@@ -479,6 +479,7 @@ void anv_CmdBindPipeline(
 {
    ANV_FROM_HANDLE(anv_cmd_buffer, cmd_buffer, commandBuffer);
    ANV_FROM_HANDLE(anv_pipeline, pipeline, _pipeline);
+   // gpgpusim_saveDumbDraw();
 
    switch (pipelineBindPoint) {
    case VK_PIPELINE_BIND_POINT_COMPUTE: {
@@ -848,7 +849,7 @@ anv_cmd_buffer_bind_descriptor_set(struct anv_cmd_buffer *cmd_buffer,
    case VK_PIPELINE_BIND_POINT_GRAPHICS:
       stages &= VK_SHADER_STAGE_ALL_GRAPHICS;
       pipe_state = &cmd_buffer->state.gfx.base;
-      gpgpusim_setDescriptorSet(set);
+      gpgpusim_setDescriptorSet(set, set_index);
       break;
 
    case VK_PIPELINE_BIND_POINT_COMPUTE:
@@ -864,7 +865,7 @@ anv_cmd_buffer_bind_descriptor_set(struct anv_cmd_buffer *cmd_buffer,
                 VK_SHADER_STAGE_INTERSECTION_BIT_KHR |
                 VK_SHADER_STAGE_CALLABLE_BIT_KHR;
       pipe_state = &cmd_buffer->state.rt.base;
-      gpgpusim_setDescriptorSet(set);
+      gpgpusim_setDescriptorSet(set, set_index);
       break;
 
    default:
@@ -990,6 +991,7 @@ void anv_CmdBindVertexBuffers2EXT(
       vb[firstBinding + i].stride = pStrides ? pStrides[i] : 0;
       cmd_buffer->state.gfx.vb_dirty |= 1 << (firstBinding + i);
    }
+   // gpgpusim_saveDumbDraw();
 }
 
 void anv_CmdBindVertexBuffers(
@@ -1165,6 +1167,7 @@ void anv_CmdPushConstants(
     const void*                                 pValues)
 {
    ANV_FROM_HANDLE(anv_cmd_buffer, cmd_buffer, commandBuffer);
+   assert(size <= MAX_PUSH_CONSTANTS_SIZE);
 
    if (stageFlags & VK_SHADER_STAGE_ALL_GRAPHICS) {
       struct anv_cmd_pipeline_state *pipe_state =

@@ -288,6 +288,7 @@ anv_batch_emit_dwords(struct anv_batch *batch, int num_dwords)
 
    batch->next += num_dwords * 4;
    assert(batch->next <= batch->end);
+   // gpgpusim_saveDumbDraw();
 
    return p;
 }
@@ -1872,6 +1873,10 @@ anv_queue_execbuf_locked(struct anv_queue *queue,
       if (ret)
          result = anv_queue_set_lost(queue, "execbuf2 failed: %m");
    }
+
+   // if (submit->cmd_buffer && submit->cmd_buffer->state.gfx.pipeline) {
+   //    gpgpusim_vkCmdDraw(submit->cmd_buffer, 0, 0, 0, 0, 0);
+   // }
 
    if(submit->cmd_buffer && submit->cmd_buffer->traceRayCall.valid)
       gpgpusim_vkCmdTraceRaysKHR(submit->cmd_buffer->traceRayCall.raygen_sbt, submit->cmd_buffer->traceRayCall.miss_sbt,

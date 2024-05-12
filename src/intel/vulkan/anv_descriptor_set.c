@@ -1598,7 +1598,9 @@ anv_descriptor_set_write_acceleration_structure(struct anv_device *device,
 static void update_gpgpusim_descriptor_sets(struct anv_descriptor_set *set)
 {
    // ID++;
-   gpgpusim_setDescriptorSet(set);
+   assert(0);
+   // just this line
+   // gpgpusim_setDescriptorSet(set);
 
    // if(ID == 10)
    // {

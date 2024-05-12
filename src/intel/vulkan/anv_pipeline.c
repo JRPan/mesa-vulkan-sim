@@ -44,6 +44,7 @@
 /* Needed for SWIZZLE macros */
 #include "program/prog_instruction.h"
 
+static int shader_ID = 0;
 // Taken from v3dv_print_spirv
 static void debug_print_spirv(const char *data, uint32_t size, FILE *fp)
 {
@@ -1563,6 +1564,7 @@ anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
    /* Walk backwards to link */
    struct anv_pipeline_stage *next_stage = NULL;
    char shaderPaths[20][200];
+   gpgpusim_map_pipeline_shader((void *) pipeline, shader_ID);
    for (int s = ARRAY_SIZE(pipeline->shaders) - 1; s >= 0; s--) {
       if (!stages[s].entrypoint)
          continue;
@@ -1591,6 +1593,9 @@ anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
 
       next_stage = &stages[s];
    }
+   // if(shader_ID == 38) {
+   //    exit(0);
+   // }
    run_rt_translation_passes();
    // VERTEX 
    assert(stages[0].stage == MESA_SHADER_VERTEX);
@@ -1600,13 +1605,7 @@ anv_pipeline_compile_graphics(struct anv_graphics_pipeline *pipeline,
    // FRAG
    assert(stages[4].stage == MESA_SHADER_FRAGMENT);
    stages[4].bin = (void *)gpgpusim_registerShader(shaderPaths[4], (uint32_t)(stages[4].stage));
-   assert((uint64_t)(stages[4].bin) % 2 == 1);
-   // for (uint32_t i = 0; i < info->stageCount; i++)
-   //    if((stages[i].stage == MESA_SHADER_VERTEX ||
-   //        stages[i].stage == MESA_SHADER_FRAGMENT) && stages[i].module) {
-   //       stages[i].bin = (void *)gpgpusim_registerShader(shaderPaths[i], (uint32_t)(stages[i].stage));
-   //       assert((uint64_t)(stages[i].bin) == i);
-   // }
+
    if (pipeline->base.device->info.gen >= 12 &&
        pipeline->subpass->view_mask != 0) {
       /* For some pipelines HW Primitive Replication can be used instead of
@@ -2311,6 +2310,7 @@ anv_graphics_pipeline_init(struct anv_graphics_pipeline *pipeline,
       if (inputs_read & (1ull << (VERT_ATTRIB_GENERIC0 + desc->location)))
          pipeline->vb_used |= 1 << desc->binding;
    }
+   gpgpusim_map_pipeline_info((void *)pipeline, pCreateInfo);
 
    for (uint32_t i = 0; i < vi_info->vertexBindingDescriptionCount; i++) {
       const VkVertexInputBindingDescription *desc =
@@ -2563,7 +2563,6 @@ deep_copy_ray_tracing_create_info(VkRayTracingPipelineCreateInfoKHR *dst,
 }
 
 static bool gpgpusim_initialized = false;
-static int shader_ID = 0;
 
 static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath)
 {

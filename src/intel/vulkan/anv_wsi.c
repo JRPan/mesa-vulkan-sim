@@ -25,6 +25,7 @@
 #include "wsi_common.h"
 #include "vk_format_info.h"
 #include "vk_util.h"
+#include "gpgpusim_calls_from_mesa.h"
 
 static PFN_vkVoidFunction
 anv_wsi_proc_addr(VkPhysicalDevice physicalDevice, const char *pName)
@@ -353,6 +354,8 @@ VkResult anv_QueuePresentKHR(
        */
       anv_semaphore_reset_temporary(queue->device, semaphore);
    }
+   // gpgpusim_vkCmdDraw(NULL, 0, 0, 0, 0, 0);
+   gpgpusim_clearDraws();
 
    return result;
 }

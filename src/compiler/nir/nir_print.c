@@ -2104,8 +2104,8 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
    }
    else if (!strcmp(info->name, "load_first_vertex")){
       if (info->has_dest) {
-         ssa_register_info[instr->dest.ssa.index].type = UINT;
-         print_ptx_reg_decl(state, instr->dest.ssa.num_components, UINT, instr->dest.ssa.bit_size);
+         ssa_register_info[instr->dest.ssa.index].type = INT;
+         print_ptx_reg_decl(state, instr->dest.ssa.num_components, INT, instr->dest.ssa.bit_size);
          print_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";\n");
          print_tabs(tabs, fp);
@@ -2114,8 +2114,8 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
    }
    else if (!strcmp(info->name, "load_vertex_id_zero_base")){
       if (info->has_dest) {
-         ssa_register_info[instr->dest.ssa.index].type = UINT;
-         print_ptx_reg_decl(state, instr->dest.ssa.num_components, UINT, instr->dest.ssa.bit_size);
+         ssa_register_info[instr->dest.ssa.index].type = INT;
+         print_ptx_reg_decl(state, instr->dest.ssa.num_components, INT, instr->dest.ssa.bit_size);
          print_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";\n");
          print_tabs(tabs, fp);
@@ -2191,44 +2191,56 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
    //    fprintf(fp, "%s ", info->name); // Intrinsic function name
    //    // fprintf(fp, "%s%d, ", val_type_to_str(ssa_register_info[instr->src[1].ssa->index].type), ssa_register_info[instr->src[1].ssa->index].num_bits);
    // }
-   // else if (!strcmp(info->name, "load_frag_coord")){
-   //    // The argument 2 probably means memory_scope=SUBGROUP
-   //    // Store lower 32 bits in dst.x and upper 32 bits in dst.y
-   //    if (info->has_dest) {
-   //       ssa_register_info[instr->dest.ssa.index].type = UINT;
-   //       print_ptx_reg_decl(state, instr->dest.ssa.num_components, UINT, instr->dest.ssa.bit_size);
-   //       print_dest_as_ptx_no_pos(&instr->dest, state);
-   //       fprintf(fp, ";\n");
-   //       print_tabs(tabs, fp);
-   //    }
-   //    fprintf(fp, "decl_var o_color, 16, 4, 2, 2, 0, 0;\n");
-   //    print_tabs(tabs, fp);
-   //    fprintf(fp,".reg .u32 %%frag_coord\n");
-   //    print_tabs(tabs, fp);
-   //    fprintf(fp, "deref_var %%frag_coord, o_color, f32, shader_out\n");
-   //    print_tabs(tabs, fp);
-   //    fprintf(fp, "load_deref 4, "); // Intrinsic function name
-   // }
-   // else if (!strcmp(info->name, "load_base_instance")){
-   //    if (info->has_dest) {
-   //       ssa_register_info[instr->dest.ssa.index].type = INT;
-   //       print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
-   //       print_dest_as_ptx_no_pos(&instr->dest, state);
-   //       fprintf(fp, ";\n");
-   //       print_tabs(tabs, fp);
-   //    }
-   //    fprintf(fp, "%s ", info->name); // Intrinsic function name
-   // }
-   // else if (!strcmp(info->name, "load_instance_id")){
-   //    if (info->has_dest) {
-   //       ssa_register_info[instr->dest.ssa.index].type = INT;
-   //       print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
-   //       print_dest_as_ptx_no_pos(&instr->dest, state);
-   //       fprintf(fp, ";\n");
-   //       print_tabs(tabs, fp);
-   //    }
-   //    fprintf(fp, "%s ", info->name); // Intrinsic function name
-   // }
+   else if (!strcmp(info->name, "load_frag_coord")){
+      if (info->has_dest) {
+         ssa_register_info[instr->dest.ssa.index].type = INT;
+         print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
+         print_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";\n");
+         print_tabs(tabs, fp);
+      }
+      fprintf(fp, "%s ", info->name); // Intrinsic function name
+   }
+   else if (!strcmp(info->name, "load_base_instance")){
+      if (info->has_dest) {
+         ssa_register_info[instr->dest.ssa.index].type = INT;
+         print_ptx_reg_decl(state, instr->dest.ssa.num_components, INT, instr->dest.ssa.bit_size);
+         print_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";\n");
+         print_tabs(tabs, fp);
+      }
+      fprintf(fp, "%s ", info->name); // Intrinsic function name
+   }
+   else if (!strcmp(info->name, "load_instance_id")){
+      if (info->has_dest) {
+         ssa_register_info[instr->dest.ssa.index].type = INT;
+         print_ptx_reg_decl(state, instr->dest.ssa.num_components, INT, instr->dest.ssa.bit_size);
+         print_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";\n");
+         print_tabs(tabs, fp);
+      }
+      fprintf(fp, "%s ", info->name); // Intrinsic function name
+   }
+   else if (!strcmp(info->name, "load_front_face")){
+      if (info->has_dest) {
+         ssa_register_info[instr->dest.ssa.index].type = PREDICATE;
+         print_ptx_reg_decl(state, instr->dest.ssa.num_components, PREDICATE, instr->dest.ssa.bit_size);
+         print_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";\n");
+         print_tabs(tabs, fp);
+      }
+      fprintf(fp, "%s ", info->name); // Intrinsic function name
+   }
+   else if (!strcmp(info->name, "discard_if")){
+      if (info->has_dest) {
+         ssa_register_info[instr->dest.ssa.index].type = INT;
+         print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
+         print_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";\n");
+         print_tabs(tabs, fp);
+      }
+      fprintf(fp, "%s ", info->name); // Intrinsic function name
+   }
    else {
       fprintf(fp, "// untranslated %s instruction. ", info->name);
    }
@@ -2239,9 +2251,6 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
       if(num_srcs > 0)
          fprintf(fp, ", ");
    }
-   // if (!strcmp(info->name, "load_frag_coord")){
-   //    fprintf(fp, ", %%frag_coord, 0 ");
-   // }
 
    for (unsigned i = 0; i < num_srcs; i++) {
       if (i != 0)
@@ -2250,9 +2259,6 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
       //    break;
       // }
       // if (!strcmp(info->name, "reduce") && i == 1) {
-      //    break;
-      // }
-      // if (!strcmp(info->name, "load_frag_coord") && i == 1) {
       //    break;
       // }
 
@@ -2266,9 +2272,6 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
          break;
       }
       if (!strcmp(info->name, "reduce") && i == 1) {
-         break;
-      }
-      if (!strcmp(info->name, "load_frag_coord") && i == 1) {
          break;
       }
       //if (i != 0)
@@ -3135,17 +3138,17 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "pack_64_2x32_split")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
+      // else if (!strcmp(nir_op_infos[instr->op].name, "pack_64_2x32_split")) {
+      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
+      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      //    fprintf(fp, ";");
+      //    fprintf(fp, "\n");
+      //    print_tabs(tabs, fp);
 
-         fprintf(fp, "pack_64_2x32_split ");
+      //    fprintf(fp, "pack_64_2x32_split ");
 
-         ssa_register_info[instr->dest.dest.ssa.index].type = UINT;
-      }
+      //    ssa_register_info[instr->dest.dest.ssa.index].type = UINT;
+      // }
       else if (!strcmp(nir_op_infos[instr->op].name, "ffloor")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT
          , instr->dest.dest.ssa.bit_size);
@@ -3179,14 +3182,14 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          print_tabs(tabs, fp);
          fprintf(fp, "sub.f32 ");
       }
-      // else if (!strcmp(nir_op_infos[instr->op].name, "fexp2")) {
-      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-      //    fprintf(fp, ";");
-      //    fprintf(fp, "\n");
-      //    print_tabs(tabs, fp);
-      //    fprintf(fp, "ex2.approx.f32 ");
-      // }
+      else if (!strcmp(nir_op_infos[instr->op].name, "fexp2")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "ex2.approx.f32 ");
+      }
       else if (!strcmp(nir_op_infos[instr->op].name, "fsin")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
@@ -3239,6 +3242,14 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          print_tabs(tabs, fp);
          fprintf(fp, "cvt.rpi.f32.f32 ");
       }
+      else if (!strcmp(nir_op_infos[instr->op].name, "flog2")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "lg2.approx.f32 ");
+      }
       // else if (!strcmp(nir_op_infos[instr->op].name, "imax")) {
       //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, INT, instr->dest.dest.ssa.bit_size);
       //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
@@ -3266,42 +3277,42 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
       //    fprintf(fp, "bfi_mesa ");
       //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
       // }
-      // else if (!strcmp(nir_op_infos[instr->op].name, "fround_even")) {
-      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-      //    fprintf(fp, ";");
-      //    fprintf(fp, "\n");
-      //    print_tabs(tabs, fp);
-      //    fprintf(fp, "cvt.rn ");
-      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
-      // }
-      // else if (!strcmp(nir_op_infos[instr->op].name, "extract_u8")) {
-      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
-      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-      //    fprintf(fp, ";");
-      //    fprintf(fp, "\n");
-      //    print_tabs(tabs, fp);
-      //    fprintf(fp, "extract_u8 ");
-      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
-      // }
-      // else if (!strcmp(nir_op_infos[instr->op].name, "fddy")) {
-      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-      //    fprintf(fp, ";");
-      //    fprintf(fp, "\n");
-      //    print_tabs(tabs, fp);
-      //    fprintf(fp, "fddy ");
-      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
-      // }
-      // else if (!strcmp(nir_op_infos[instr->op].name, "fddx")) {
-      //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-      //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-      //    fprintf(fp, ";");
-      //    fprintf(fp, "\n");
-      //    print_tabs(tabs, fp);
-      //    fprintf(fp, "fddx ");
-      //    // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
-      // }
+      else if (!strcmp(nir_op_infos[instr->op].name, "fround_even")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "cvt.rni.f32.f32 ");
+         // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      }
+      else if (!strcmp(nir_op_infos[instr->op].name, "extract_u8")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "extract_u8 ");
+         // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      }
+      else if (!strcmp(nir_op_infos[instr->op].name, "fddy")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "fddy ");
+         // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      }
+      else if (!strcmp(nir_op_infos[instr->op].name, "fddx")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         fprintf(fp, "fddx ");
+         // fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+      }
       // else if (!strcmp(nir_op_infos[instr->op].name, "bfm")) {
       //    print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, UINT, instr->dest.dest.ssa.bit_size);
       //    print_alu_dest_as_ptx_no_pos(&instr->dest, state);
@@ -4398,9 +4409,9 @@ print_jump_instr_as_ptx(nir_jump_instr *instr, print_state *state)
       fprintf(fp, "bra loop_%d_exit;", loopID - 1);
       break;
 
-   case nir_jump_continue:
-      fprintf(fp, "continue");
-      break;
+   // case nir_jump_continue:
+   //    fprintf(fp, "continue");
+   //    break;
 
    case nir_jump_return:
       fprintf(fp, "return");
@@ -4842,8 +4853,91 @@ print_var_decl_as_ptx(nir_variable *var, print_state *state)
    if(size < 4)
       size = 4;
 
-   fprintf(fp, "decl_var %s, %d, %d, %d, %d, %u, %u;\t", get_var_name(var, state), size, glsl_get_vector_elements(var->type), 
-                  glsl_get_base_type(var->type), var->data.mode, var->data.driver_location, var->data.binding);
+   const char *loc = NULL;
+   char buf[4];
+   const char *components = NULL;
+   if (var->data.mode == nir_var_shader_in ||
+       var->data.mode == nir_var_shader_out ||
+       var->data.mode == nir_var_uniform ||
+       var->data.mode == nir_var_mem_ubo ||
+       var->data.mode == nir_var_mem_ssbo)
+   {
+
+      switch (state->shader->info.stage)
+      {
+      case MESA_SHADER_VERTEX:
+         if (var->data.mode == nir_var_shader_in)
+            loc = gl_vert_attrib_name(var->data.location);
+         else if (var->data.mode == nir_var_shader_out)
+            loc = gl_varying_slot_name_for_stage(var->data.location,
+                                                 state->shader->info.stage);
+         break;
+      case MESA_SHADER_GEOMETRY:
+         if ((var->data.mode == nir_var_shader_in) ||
+             (var->data.mode == nir_var_shader_out))
+         {
+            loc = gl_varying_slot_name_for_stage(var->data.location,
+                                                 state->shader->info.stage);
+         }
+         break;
+      case MESA_SHADER_FRAGMENT:
+         if (var->data.mode == nir_var_shader_in)
+         {
+            loc = gl_varying_slot_name_for_stage(var->data.location,
+                                                 state->shader->info.stage);
+         }
+         else if (var->data.mode == nir_var_shader_out)
+         {
+            loc = gl_frag_result_name(var->data.location);
+         }
+         break;
+      case MESA_SHADER_TESS_CTRL:
+      case MESA_SHADER_TESS_EVAL:
+      case MESA_SHADER_COMPUTE:
+      case MESA_SHADER_KERNEL:
+      default:
+         /* TODO */
+         break;
+      }
+
+      if (!loc)
+      {
+         if (var->data.location == ~0)
+         {
+            loc = "~0";
+         }
+         else
+         {
+            snprintf(buf, sizeof(buf), "%u", var->data.location);
+            loc = buf;
+         }
+      }
+
+      /* For shader I/O vars that have been split to components or packed,
+       * print the fractional location within the input/output.
+       */
+      unsigned int num_components =
+          glsl_get_components(glsl_without_array(var->type));
+      char components_local[18] = {'_' /* the rest is 0-filled */};
+      switch (var->data.mode)
+      {
+      case nir_var_shader_in:
+      case nir_var_shader_out:
+         if (num_components < 16 && num_components != 0)
+         {
+            const char *xyzw = comp_mask_string(num_components);
+            for (int i = 0; i < num_components; i++)
+               components_local[i + 1] = xyzw[i + var->data.location_frac];
+
+            components = components_local;
+         }
+         break;
+      default:
+         break;
+      }
+   }
+   fprintf(fp, "decl_var %s, %d, %d, %d, %d, %u, %u, %s%s;\t", get_var_name(var, state), size, glsl_get_vector_elements(var->type), 
+                  glsl_get_base_type(var->type), var->data.mode, var->data.descriptor_set, var->data.binding, loc? loc : "UNDEFINED", components ? components : "");
 
    // if ((var->data.mode == nir_var_shader_temp) ||
    //       (var->data.mode == nir_var_shader_call_data) ||
@@ -4893,82 +4987,12 @@ print_var_decl_as_ptx(nir_variable *var, print_state *state)
    fprintf(fp, "%s %s", glsl_get_type_name(var->type),
            get_var_name(var, state));
 
-   if (var->data.mode == nir_var_shader_in ||
-       var->data.mode == nir_var_shader_out ||
-       var->data.mode == nir_var_uniform ||
-       var->data.mode == nir_var_mem_ubo ||
-       var->data.mode == nir_var_mem_ssbo) {
-      const char *loc = NULL;
-      char buf[4];
-
-      switch (state->shader->info.stage) {
-      case MESA_SHADER_VERTEX:
-         if (var->data.mode == nir_var_shader_in)
-            loc = gl_vert_attrib_name(var->data.location);
-         else if (var->data.mode == nir_var_shader_out)
-            loc = gl_varying_slot_name_for_stage(var->data.location,
-                                                 state->shader->info.stage);
-         break;
-      case MESA_SHADER_GEOMETRY:
-         if ((var->data.mode == nir_var_shader_in) ||
-             (var->data.mode == nir_var_shader_out)) {
-            loc = gl_varying_slot_name_for_stage(var->data.location,
-                                                 state->shader->info.stage);
-         }
-         break;
-      case MESA_SHADER_FRAGMENT:
-         if (var->data.mode == nir_var_shader_in) {
-            loc = gl_varying_slot_name_for_stage(var->data.location,
-                                                 state->shader->info.stage);
-         } else if (var->data.mode == nir_var_shader_out) {
-            loc = gl_frag_result_name(var->data.location);
-         }
-         break;
-      case MESA_SHADER_TESS_CTRL:
-      case MESA_SHADER_TESS_EVAL:
-      case MESA_SHADER_COMPUTE:
-      case MESA_SHADER_KERNEL:
-      default:
-         /* TODO */
-         break;
-      }
-
-      if (!loc) {
-         if (var->data.location == ~0) {
-            loc = "~0";
-         } else {
-            snprintf(buf, sizeof(buf), "%u", var->data.location);
-            loc = buf;
-         }
-      }
-
-      /* For shader I/O vars that have been split to components or packed,
-       * print the fractional location within the input/output.
-       */
-      unsigned int num_components =
-         glsl_get_components(glsl_without_array(var->type));
-      const char *components = NULL;
-      char components_local[18] = {'.' /* the rest is 0-filled */};
-      switch (var->data.mode) {
-      case nir_var_shader_in:
-      case nir_var_shader_out:
-         if (num_components < 16 && num_components != 0) {
-            const char *xyzw = comp_mask_string(num_components);
-            for (int i = 0; i < num_components; i++)
-               components_local[i + 1] = xyzw[i + var->data.location_frac];
-
-            components = components_local;
-         }
-         break;
-      default:
-         break;
-      }
 
       fprintf(fp, " (%s%s, %u, %u)%s", loc,
               components ? components : "",
-              var->data.driver_location, var->data.binding,
+              var->data.descriptor_set, var->data.binding,
+            //   var->data.driver_location, var->data.binding,
               var->data.compact ? " compact" : "");
-   }
 
    if (var->constant_initializer) {
       fprintf(fp, " = { ");

@@ -50,11 +50,14 @@ extern void gpgpusim_vkCmdTraceRaysKHR(
                       uint32_t launch_depth,
                       uint64_t launch_size_addr);
 
-extern void gpgpusim_vkCmdDraw(struct anv_cmd_buffer *cmd_buffer, unsigned instanceCount);
+extern void gpgpusim_vkCmdDraw(struct anv_cmd_buffer *cmd_buffer, unsigned VertexCountPerInstance, unsigned StartVertex, unsigned instanceCount, unsigned StartInstance, unsigned BaseVertex);
+extern void gpgpusim_clearDraws();
+extern void gpgpusim_saveDumbDraw();
+extern void gpgpusim_saveDraw(struct anv_cmd_buffer *cmd_buffer, unsigned VertexCountPerInstance, unsigned StartVertex, unsigned instanceCount, unsigned StartInstance, unsigned BaseVertex);
 extern void gpgpusim_saveIndexBuffer(struct anv_buffer *ptr, VkIndexType type);
 
 extern void gpgpusim_setDescriptor(uint32_t setID, uint32_t descID, void *address, uint32_t size, VkDescriptorType type);
-extern void gpgpusim_setDescriptorSet(struct anv_descriptor_set *set);
+extern void gpgpusim_setDescriptorSet(struct anv_descriptor_set *set, unsigned set_index);
 
 // For trace runner
 extern void gpgpusim_addTreelets_cpp(VkAccelerationStructureKHR accelerationStructure);
@@ -74,4 +77,6 @@ extern void gpgpusim_vkCmdTraceRaysKHR_cpp(
 extern void gpgpusim_setDescriptorSet_cpp(uint32_t setID, uint32_t descID, void *address, uint32_t size, VkDescriptorType type);
 
 extern void gpgpusim_pass_child_addr(void* address);
+extern void gpgpusim_map_pipeline_shader(void *ptr, unsigned shader_index);
+extern void gpgpusim_map_pipeline_info(void *ptr, VkGraphicsPipelineCreateInfo *pCreateInfo);
 #endif /* GPGPUSIM_CALLS_FROM_MESA_H */

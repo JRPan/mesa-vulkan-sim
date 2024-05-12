@@ -1315,7 +1315,7 @@ out:
        */
       result = anv_device_set_lost(queue->device, "vkQueueSubmit() failed");
    }
-
+   gpgpusim_vkCmdDraw(NULL, 0, 0, 0, 0, 0);
    return result;
 }
 

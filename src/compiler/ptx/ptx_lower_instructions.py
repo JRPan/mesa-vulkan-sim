@@ -129,6 +129,8 @@ def translate_vector_operands(ptx_shader, unique_ID):
             newLines = list()
 
             newLine = PTXFunctionalLine()
+            if line.fullFunction == FunctionalType.load_const:
+                line.fullFunction = 'mov.f32'
             newLine.leadingWhiteSpace = line.leadingWhiteSpace
             argIndex = 0
             arg = line.args[argIndex]
@@ -725,7 +727,7 @@ def translate_decl_var(ptx_shader):
         # print(line.args)
         # exit(-1)
 
-        name, size, vector_number, variable_type, storage_qualifier_type, driver_location, binding = line.args
+        name, size, vector_number, variable_type, storage_qualifier_type, driver_location, binding, drivername = line.args
         name = '%' + name
         # if int(vector_number) > 1:
         #     continue
@@ -749,7 +751,7 @@ def translate_decl_var(ptx_shader):
             newLine = PTXFunctionalLine()
             newLine.leadingWhiteSpace = '\t'
             newLine.comment = line.comment
-            newLine.buildString('rt_alloc_mem', (name, str(allocation_size), str(storage_qualifier_type)))
+            newLine.buildString('rt_alloc_mem', (name, str(allocation_size), str(storage_qualifier_type), drivername))
 
         new_declerations.append(newReg)
         # new_declerations.append(newSizeSet)
@@ -982,6 +984,12 @@ def translate_phi(ptx_shader):
                 variableType = src1Decleration.variableType #lets go with .s for now
             elif src0Decleration.variableType[0:2] == '.b' and src1Decleration.variableType[0:2] == '.s':
                 variableType = src1Decleration.variableType
+            elif src0Decleration.variableType[0:2] == '.b' and src1Decleration.variableType[0:2] == '.u':
+                variableType = src1Decleration.variableType
+            elif src0Decleration.variableType[0:2] == '.u' and src1Decleration.variableType[0:2] == '.b':
+                variableType = src0Decleration.variableType
+            elif src0Decleration.variableType[0:2] == '.p' or src1Decleration.variableType[0:2] == '.p':
+                variableType = '.pred'
             else:
                 assert 0
 
@@ -1426,9 +1434,16 @@ def translate_texture_instructions(ptx_shader):
             newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
             line.buildString(line.functionalType, [texture, sampler] + newDstNames + newCoordNames[0:2] + [lod, ])
         elif line.functionalType == FunctionalType.tex:
-            dst, texture, sampler, coord = line.args
-
-            newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
+            if len(line.args) == 4:
+                dst, texture, sampler, coord = line.args
+            elif len(line.args) == 5:
+                dst, texture, sampler, coord, dumb = line.args
+            
+            declaration, _ = ptx_shader.findDeclaration(dst)
+            if declaration.isVector():
+                newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
+            else:
+                newDstNames = [dst, dst, dst, dst]
             newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
             if len(newCoordNames) < 3:
                 newCoordNames.append(str(0))
@@ -1439,6 +1454,12 @@ def translate_texture_instructions(ptx_shader):
 
             newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
             line.buildString(FunctionalType.txs, newDstNames + [texture, ] + [lod, ])
+        elif line.functionalType == FunctionalType.txf:
+            dst, texture, coord, lod = line.args
+            newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
+
+            newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
+            line.buildString(FunctionalType.txs, newDstNames + [texture, ] + newCoordNames + [lod, ])
             
 
 
@@ -1453,6 +1474,10 @@ def translate_special_intrinsics(ptx_shader):
             dst, memory_scope = line.args
             newRegNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
             line.buildString(FunctionalType.shader_clock, newRegNames[0:2])
+        elif line.functionalType == FunctionalType.load_frag_coord:
+            dst = line.args[0]
+            newRegNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
+            line.buildString(FunctionalType.load_frag_coord, newRegNames)
         
         # if line.functionalType == FunctionalType.report_ray_intersection:
         #     dst, src0, src1 = line.args

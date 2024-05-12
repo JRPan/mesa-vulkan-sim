@@ -3847,9 +3847,7 @@ void genX(CmdDrawIndexed)(
 
    update_dirty_vbs_for_gen8_vb_flush(cmd_buffer, RANDOM);
 
-   gpgpusim_vkCmdDraw(cmd_buffer, instanceCount);
-         // gpgpusim_vkCmdDraw(cmd_buffer->state.vertex_bindings, 
-      // cmd_buffer->state.gfx.pipeline,cmd_buffer->state.gfx.dynamic.viewport.viewports, instanceCount);
+   gpgpusim_saveDraw(cmd_buffer, indexCount, firstIndex, instanceCount, firstInstance, vertexOffset);
 }
 
 /* Auto-Draw / Indirect Registers */
