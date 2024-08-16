@@ -2668,6 +2668,16 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
    else if (!strcmp(info->name, "ignore_ray_intersection")){
       fprintf(fp, "%s ", info->name); // Intrinsic function name
    }
+   else if (!strcmp(info->name, "load_ubo")){
+      if (info->has_dest) {
+         ssa_register_info[instr->dest.ssa.index].type = FLOAT;
+         print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
+         print_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";\n");
+         print_tabs(tabs, fp);
+      }
+      fprintf(fp, "%s ", info->name); // Intrinsic function name
+   }
    else {
       fprintf(fp, "// Untranslated %s instruction. ", info->name);
    }
@@ -4016,7 +4026,7 @@ print_tex_instr_as_ptx(nir_tex_instr *instr, print_state *state, ssa_reg_info *s
 
    ssa_register_info[instr->dest.ssa.index].type = FLOAT;
 
-   assert(instr->op == nir_texop_txl);
+   // assert(instr->op == nir_texop_txl);
 
    switch (instr->op) {
    case nir_texop_tex:
@@ -4080,6 +4090,11 @@ print_tex_instr_as_ptx(nir_tex_instr *instr, print_state *state, ssa_reg_info *s
    for (unsigned i = 0; i < instr->num_srcs; i++) {
       fprintf(fp, ", ");
       print_src_as_ptx(&instr->src[i].src, state);
+   }
+
+   if (instr->op == nir_texop_tex) {
+      fprintf(fp, ", %u ", instr->texture_index);
+      fprintf(fp, ", %u ", instr->sampler_index);
    }
 
    fprintf(fp, ";");
@@ -5117,9 +5132,83 @@ print_var_decl_as_ptx(nir_variable *var, print_state *state)
    
    if(size < 4)
       size = 4;
+   
+   const char *loc = NULL;
+   char buf[4];
+   const char *components = NULL;
+   if (var->data.mode == nir_var_shader_in ||
+       var->data.mode == nir_var_shader_out ||
+       var->data.mode == nir_var_uniform ||
+       var->data.mode == nir_var_mem_ubo ||
+       var->data.mode == nir_var_mem_ssbo) {
 
-   fprintf(fp, "decl_var %s, %d, %d, %d, %d, %u, %u;\t", var->name, size, glsl_get_vector_elements(var->type), 
-                  glsl_get_base_type(var->type), var->data.mode, var->data.driver_location, var->data.binding);
+      switch (state->shader->info.stage) {
+      case MESA_SHADER_VERTEX:
+         if (var->data.mode == nir_var_shader_in)
+            loc = gl_vert_attrib_name(var->data.location);
+         else if (var->data.mode == nir_var_shader_out)
+            loc = gl_varying_slot_name_for_stage(var->data.location,
+                                                 state->shader->info.stage);
+         break;
+      case MESA_SHADER_GEOMETRY:
+         if ((var->data.mode == nir_var_shader_in) ||
+             (var->data.mode == nir_var_shader_out)) {
+            loc = gl_varying_slot_name_for_stage(var->data.location,
+                                                 state->shader->info.stage);
+         }
+         break;
+      case MESA_SHADER_FRAGMENT:
+         if (var->data.mode == nir_var_shader_in) {
+            loc = gl_varying_slot_name_for_stage(var->data.location,
+                                                 state->shader->info.stage);
+         } else if (var->data.mode == nir_var_shader_out) {
+            loc = gl_frag_result_name(var->data.location);
+         }
+         break;
+      case MESA_SHADER_TESS_CTRL:
+      case MESA_SHADER_TESS_EVAL:
+      case MESA_SHADER_COMPUTE:
+      case MESA_SHADER_KERNEL:
+      default:
+         /* TODO */
+         break;
+      }
+
+      if (!loc) {
+         if (var->data.location == ~0) {
+            loc = "~0";
+         } else {
+            snprintf(buf, sizeof(buf), "%u", var->data.location);
+            loc = buf;
+         }
+      }
+
+      /* For shader I/O vars that have been split to components or packed,
+       * print the fractional location within the input/output.
+       */
+      unsigned int num_components =
+         glsl_get_components(glsl_without_array(var->type));
+      char components_local[18] = {'_' /* the rest is 0-filled */};
+      switch (var->data.mode) {
+      case nir_var_shader_in:
+      case nir_var_shader_out:
+         if (num_components < 16 && num_components != 0) {
+            const char *xyzw = comp_mask_string(num_components);
+            for (int i = 0; i < num_components; i++)
+               components_local[i + 1] = xyzw[i + var->data.location_frac];
+
+            components = components_local;
+         }
+         break;
+      default:
+         break;
+      }
+   }
+
+   fprintf(fp, "decl_var %s, %d, %d, %d, %d, %u, %u, %u, %s%s;\t", var->name, size,
+           glsl_get_vector_elements(var->type), glsl_get_base_type(var->type), var->data.mode,
+           var->data.driver_location, var->data.descriptor_set, var->data.binding,
+           loc ? loc : "UNDEFINED", components ? components : "");
 
    // if ((var->data.mode == nir_var_shader_temp) ||
    //       (var->data.mode == nir_var_shader_call_data) ||
@@ -5169,83 +5258,11 @@ print_var_decl_as_ptx(nir_variable *var, print_state *state)
    fprintf(fp, "%s %s", glsl_get_type_name(var->type),
            get_var_name(var, state));
 
-   if (var->data.mode == nir_var_shader_in ||
-       var->data.mode == nir_var_shader_out ||
-       var->data.mode == nir_var_uniform ||
-       var->data.mode == nir_var_mem_ubo ||
-       var->data.mode == nir_var_mem_ssbo) {
-      const char *loc = NULL;
-      char buf[4];
-
-      switch (state->shader->info.stage) {
-      case MESA_SHADER_VERTEX:
-         if (var->data.mode == nir_var_shader_in)
-            loc = gl_vert_attrib_name(var->data.location);
-         else if (var->data.mode == nir_var_shader_out)
-            loc = gl_varying_slot_name_for_stage(var->data.location,
-                                                 state->shader->info.stage);
-         break;
-      case MESA_SHADER_GEOMETRY:
-         if ((var->data.mode == nir_var_shader_in) ||
-             (var->data.mode == nir_var_shader_out)) {
-            loc = gl_varying_slot_name_for_stage(var->data.location,
-                                                 state->shader->info.stage);
-         }
-         break;
-      case MESA_SHADER_FRAGMENT:
-         if (var->data.mode == nir_var_shader_in) {
-            loc = gl_varying_slot_name_for_stage(var->data.location,
-                                                 state->shader->info.stage);
-         } else if (var->data.mode == nir_var_shader_out) {
-            loc = gl_frag_result_name(var->data.location);
-         }
-         break;
-      case MESA_SHADER_TESS_CTRL:
-      case MESA_SHADER_TESS_EVAL:
-      case MESA_SHADER_COMPUTE:
-      case MESA_SHADER_KERNEL:
-      default:
-         /* TODO */
-         break;
-      }
-
-      if (!loc) {
-         if (var->data.location == ~0) {
-            loc = "~0";
-         } else {
-            snprintf(buf, sizeof(buf), "%u", var->data.location);
-            loc = buf;
-         }
-      }
-
-      /* For shader I/O vars that have been split to components or packed,
-       * print the fractional location within the input/output.
-       */
-      unsigned int num_components =
-         glsl_get_components(glsl_without_array(var->type));
-      const char *components = NULL;
-      char components_local[18] = {'.' /* the rest is 0-filled */};
-      switch (var->data.mode) {
-      case nir_var_shader_in:
-      case nir_var_shader_out:
-         if (num_components < 16 && num_components != 0) {
-            const char *xyzw = comp_mask_string(num_components);
-            for (int i = 0; i < num_components; i++)
-               components_local[i + 1] = xyzw[i + var->data.location_frac];
-
-            components = components_local;
-         }
-         break;
-      default:
-         break;
-      }
-
-      fprintf(fp, " (%s%s, %u, %u)%s", loc,
+   fprintf(fp, " (%s%s, %u, %u)%s", loc,
               components ? components : "",
               var->data.driver_location, var->data.binding,
               var->data.compact ? " compact" : "");
-   }
-
+   
    if (var->constant_initializer) {
       fprintf(fp, " = { ");
       print_constant(var->constant_initializer, var->type, state);
@@ -5293,6 +5310,12 @@ print_ptx_function_impl(nir_function_impl *impl, print_state *state, gl_shader_s
          break;
       case MESA_SHADER_CALLABLE:
          fprintf(fp, "MESA_SHADER_CALLABLE");
+         break;
+      case MESA_SHADER_VERTEX:
+         fprintf(fp, "MESA_SHADER_VERTEX");
+         break;
+      case MESA_SHADER_FRAGMENT:
+         fprintf(fp, "MESA_SHADER_FRAGMENT");
          break;
       default:
          unreachable("Invalid shader type");

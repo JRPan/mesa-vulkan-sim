@@ -41,7 +41,108 @@
 #include "lp_query.h"
 
 #include "draw/draw_context.h"
+#include "draw/draw_vs.h"
 
+#include "../../frontends/lavapipe/gpgpusim_calls_from_mesa.h"
+
+
+static bool gpgpusim_initialized = false;
+static int shader_ID = 0;
+
+static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath)
+{
+   FILE *pFile;
+   char *mesa_root = getenv("MESA_ROOT");
+   char *filePath = "gpgpusimShaders/";
+   char fileName[50];
+   char *label; // in case there are multiple variants of the same shader
+   char *extension = ".ptx";
+   int id = 0;
+   
+   label = shader->info.label;
+   if (!label){
+      label = "0";
+   }
+
+   switch (shader->info.stage) {
+      case MESA_SHADER_RAYGEN:
+         strcpy(fileName, "MESA_SHADER_RAYGEN");
+         id = shader_ID;
+         break;
+      case MESA_SHADER_ANY_HIT:
+         strcpy(fileName, "MESA_SHADER_ANY_HIT");
+         id = shader_ID;
+         break;
+      case MESA_SHADER_CLOSEST_HIT:
+         strcpy(fileName, "MESA_SHADER_CLOSEST_HIT");
+         id = shader_ID;
+         break;
+      case MESA_SHADER_MISS:
+         strcpy(fileName, "MESA_SHADER_MISS");
+         id = shader_ID;
+         break;
+      case MESA_SHADER_INTERSECTION:
+         strcpy(fileName, "MESA_SHADER_INTERSECTION");
+         id = shader_ID;
+         break;
+      case MESA_SHADER_CALLABLE:
+         strcpy(fileName, "MESA_SHADER_CALLABLE");
+         id = shader_ID;
+         break;
+      case MESA_SHADER_VERTEX:
+         strcpy(fileName, "MESA_SHADER_VERTEX");
+         id = shader_ID;
+         break;
+      case MESA_SHADER_FRAGMENT:
+         strcpy(fileName, "MESA_SHADER_FRAGMENT");
+         id = shader_ID;
+         break;
+      default:
+         unreachable("Invalid shader type");
+   }
+
+   shader_ID++;
+   char fullPath[200];
+   snprintf(fullPath, sizeof(fullPath), "%s%s%s_%d%s", mesa_root, filePath, fileName, id, extension);
+   
+   char command[200];
+
+   if(!gpgpusim_initialized){
+      snprintf(command, sizeof(command), "rm -rf %s%s", mesa_root, filePath);
+      system(command);
+      gpgpusim_initialized = true;
+   }
+
+   snprintf(command, sizeof(command), "mkdir -p %s%s", mesa_root, filePath);
+   system(command);
+   
+   pFile = fopen (fullPath , "w");
+   printf("GPGPU-SIM VULKAN: Translating NIR %s to PTX\n", fileName);
+   nir_translate_shader_to_ptx(shader, pFile, fullPath);
+
+   strcpy(shaderPath, fullPath);
+
+   // if(1){ // debugging: print out current nir shader
+   //    nir_print_shader(shader, stderr);
+   //    nir_translate_shader_to_ptx(shader, stderr, NULL);
+   // }
+}
+
+static void run_rt_translation_passes()
+{
+   char *mesa_root = getenv("MESA_ROOT");
+   char *filePath = "gpgpusimShaders/";
+
+   char command[400];
+   snprintf(command, sizeof(command), "python3 %s/src/compiler/ptx/ptx_lower_instructions.py %s%s", mesa_root, mesa_root, filePath);
+   int result = system(command);
+
+   if (result != 0)
+   {
+      printf("MESA: ERROR ** while translating nir to PTX %d\n", result);
+      exit(1);
+   }
+}
 
 
 /**
@@ -79,6 +180,28 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
    /*
     * Map vertex buffers
     */
+   char *v_Path = (char *)malloc(200);
+   char *f_Path = (char *)malloc(200);
+   translate_nir_to_ptx(lp->vs->state.ir.nir, v_Path);
+   translate_nir_to_ptx(lp->fs->base.ir.nir, f_Path);
+   run_rt_translation_passes();
+   gpgpusim_registerShader(v_Path, (uint32_t)(MESA_SHADER_VERTEX));
+
+   // FRAG
+   gpgpusim_registerShader(f_Path, (uint32_t)(MESA_SHADER_FRAGMENT));
+
+   for (unsigned stage = 0; stage < PIPE_SHADER_MESH_TYPES; stage++) {
+      for (unsigned index = 0; index < LP_MAX_TGSI_CONST_BUFFERS; index++) {
+         if (lp->constants[stage][index].buffer) {
+            const void *buf = llvmpipe_resource_data(lp->constants[stage][index].buffer);
+            size_t size = lp->constants[stage][index].buffer_size;
+            unsigned offset = lp->constants[stage][index].buffer_offset;
+            gpgpusim_saveUBO(stage, index, offset, size, buf);
+         }
+      }
+   }
+
+
    for (i = 0; i < lp->num_vertex_buffers; i++) {
       const void *buf = lp->vertex_buffer[i].is_user_buffer ?
                            lp->vertex_buffer[i].buffer.user : NULL;
@@ -89,6 +212,14 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
          }
          buf = llvmpipe_resource_data(lp->vertex_buffer[i].buffer.resource);
          size = lp->vertex_buffer[i].buffer.resource->width0;
+      }
+      if (buf != NULL) {
+         gpgpusim_bindVertex(i, (float *)buf, size, lp->vertex_buffer[i].stride);
+         assert(lp->velems->velem[i].vertex_buffer_index == i);
+         gpgpusim_saveVertexInfo(lp->velems->velem[i].vertex_buffer_index,
+                                 lp->velems->velem[i].vertex_buffer_index,
+                                 lp->velems->velem[i].src_offset,
+                                 lp->velems->velem[i].instance_divisor);
       }
       draw_set_mapped_vertex_buffer(draw, i, buf, size);
    }
@@ -104,6 +235,7 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
       draw_set_indexes(draw,
                        (ubyte *) mapped_indices,
                        info->index_size, available_space);
+      gpgpusim_saveIndexBuffer((void *)mapped_indices, info->index_size, available_space);
    }
 
    llvmpipe_prepare_vertex_sampling(lp,
@@ -147,9 +279,11 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
                                      !lp->queries_disabled);
 
    /* draw! */
+   gpgpusim_saveInstance(info->instance_count, info->start_instance);
+   gpgpusim_savePipeCtx((void *) pipe);
+   gpgpusim_vkCmdDraw();
    draw_vbo(draw, info, drawid_offset, indirect, draws, num_draws,
             lp->patch_vertices);
-
    /*
     * unmap vertex/index buffers
     */

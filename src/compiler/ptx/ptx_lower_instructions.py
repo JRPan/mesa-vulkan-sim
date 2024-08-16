@@ -383,6 +383,10 @@ def translate_deref_instructions(ptx_shader):
         #             if variableType[1] == 'f':
         #                 zero = '0F00000000'
         #             line.buildString('add%s' % variableType, (line.args[0], line.args[1], zero))
+        elif line.functionalType == FunctionalType.load_ubo:
+            dst, src0, src2, reg0, reg1, reg2, reg3, reg4 = line.args
+            newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
+            line.buildString(line.functionalType, newDstNames + [src0, src2, reg0, reg1, reg2, reg3, "0"])
 
 def translate_trace_ray(ptx_shader, shaderIDs):
     trace_ray_ID = 0
@@ -834,7 +838,7 @@ def translate_decl_var(ptx_shader):
         # debug_print(line.args)
         # exit(-1)
 
-        name, size, vector_number, variable_type, storage_qualifier_type, driver_location, binding = line.args
+        name, size, vector_number, variable_type, storage_qualifier_type, driver_location, descriptor_set, binding, drivername = line.args
         name = '%' + name
         # if int(vector_number) > 1:
         #     continue
@@ -854,12 +858,12 @@ def translate_decl_var(ptx_shader):
             newLine = PTXFunctionalLine()
             newLine.leadingWhiteSpace = '\t'
             newLine.comment = line.comment
-            newLine.buildString('load_vulkan_descriptor', (name, driver_location, binding))
+            newLine.buildString('load_vulkan_descriptor', (name, descriptor_set, binding))
         else:
             newLine = PTXFunctionalLine()
             newLine.leadingWhiteSpace = '\t'
             newLine.comment = line.comment
-            newLine.buildString('rt_alloc_mem', (name, str(allocation_size), str(storage_qualifier_type)))
+            newLine.buildString('rt_alloc_mem', (name, str(allocation_size), str(storage_qualifier_type), str(driver_location), drivername))
 
         new_declerations.append(newReg)
         # new_declerations.append(newSizeSet)
@@ -1536,6 +1540,11 @@ def translate_texture_instructions(ptx_shader):
             newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
             newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
             line.buildString(line.functionalType, [texture, sampler] + newDstNames + newCoordNames[0:2] + [lod, ])
+        elif line.functionalType == FunctionalType.tex:
+            dst,  coord, texture, sampler = line.args
+            newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
+            newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
+            line.buildString('tex.2d.v4.f32.f32', newDstNames + [texture, sampler] + newCoordNames[0:2])
             
 
 

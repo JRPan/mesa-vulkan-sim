@@ -1,6 +1,6 @@
 embree_lib = 'embree3'
-embree_lib_dir = '/opt/embree-3.12.2.x86_64.linux/lib'
-embree_header_dir = '/opt/embree-3.12.2.x86_64.linux/include'
+embree_lib_dir = '/home/pan251/vulkan-sim-2/embree-3.13.5.x86_64.linux/lib'
+embree_header_dir = '/home/pan251/vulkan-sim-2/embree-3.13.5.x86_64.linux/include'
 dep_embree = declare_dependency(
     link_args : ['-L' + embree_lib_dir, '-l' + embree_lib],
     include_directories : include_directories(embree_header_dir))

@@ -76,4 +76,12 @@ extern void gpgpusim_vkCmdTraceRaysKHR_cpp(
 extern void gpgpusim_setDescriptorSet_cpp(uint32_t setID, uint32_t descID, void *address, uint32_t size, VkDescriptorType type);
 
 extern void gpgpusim_pass_child_addr(void* address);
+
+extern void gpgpusim_vkCmdDraw();
+extern void gpgpusim_bindVertex(unsigned index, float *addr, unsigned size, unsigned stride);
+extern void gpgpusim_saveIndexBuffer(void *ptr, unsigned index_size, unsigned buf_size);
+extern void gpgpusim_saveVertexInfo(unsigned location, unsigned binding, unsigned offset, unsigned rate);
+extern void gpgpusim_saveInstance(unsigned instanceCount, unsigned startInstance);
+extern void gpgpusim_savePipeCtx(void *ctx);
+extern void gpgpusim_saveUBO(unsigned stage, unsigned index, unsigned offset, unsigned size, void *addr);
 #endif /* GPGPUSIM_CALLS_FROM_MESA_H */

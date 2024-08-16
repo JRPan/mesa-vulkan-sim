@@ -243,6 +243,7 @@ class FunctionalType(Enum, metaclass=MetaEnum):
     ret = 'ret'
     phi = 'phi'
     load_const = 'load_const'
+    load_ubo = 'load_ubo'
     load_ray_world_to_object = 'load_ray_world_to_object'
     load_ray_object_to_world = 'load_ray_object_to_world'
     load_ray_world_direction = 'load_ray_world_direction'
@@ -255,6 +256,7 @@ class FunctionalType(Enum, metaclass=MetaEnum):
     selp = 'selp'
     pack_64_2x32_split = 'pack_64_2x32_split'
     txl = 'txl'
+    tex = 'tex'
     b2f32 = 'b2f32'
     fsign = 'fsign'
     shader_clock = 'shader_clock'
@@ -374,6 +376,8 @@ class ShaderType(Enum):
     Intersection = auto()
     Any_hit = auto()
     Callable = auto()
+    Fragment = auto()
+    VERTEX = auto()
 
 
 class PTXShader:
@@ -384,6 +388,7 @@ class PTXShader:
         self.lines = []
         self.vectorVariables = list()
         for line in f:
+            line = line.replace(".gl_Position", "gl_Position")
             debug_print('parsing line %s: %s' % (lineNO, line))
             ptxLine = PTXLine.createNewLine(line)
             ptxLine.lineNO = lineNO
@@ -425,6 +430,10 @@ class PTXShader:
                 return ShaderType.Any_hit
             if 'CALLABLE' in line.fullLine:
                 return ShaderType.Callable
+            if 'MESA_SHADER_FRAGMENT' in line.fullLine:
+                return ShaderType.Fragment
+            if 'MESA_SHADER_VERTEX' in line.fullLine:
+                return ShaderType.VERTEX
             
             assert 0
     

@@ -1634,6 +1634,7 @@ static void handle_descriptor_sets(struct vk_cmd_queue_entry *cmd,
          handle_set_stage(state, &dyn_info, set, MESA_SHADER_MESH, MESA_SHADER_MESH);
 
       increment_dyn_info(&dyn_info, layout->vk.set_layouts[bds->first_set + i], true);
+      gpgpusim_setDescriptorSet(set);
    }
 }
 

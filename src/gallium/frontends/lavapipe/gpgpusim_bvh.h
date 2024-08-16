@@ -102,7 +102,7 @@ anv_address_map(struct anv_address addr)
    if (addr.bo->map == NULL)
       return NULL;
 
-   return addr.bo->map + addr.offset;
+   return (void *)((char *)addr.bo->map + addr.offset);
 }
 
 struct GENERAL_SBT {
