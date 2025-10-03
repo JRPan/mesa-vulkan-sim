@@ -151,6 +151,8 @@ static void run_rt_translation_passes()
  * Basically, map the vertex buffers (and drawing surfaces), then hand off
  * the drawing to the 'draw' module.
  */
+static unsigned draw_num = 0;
+
 static void
 llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
                   unsigned drawid_offset,
@@ -223,7 +225,12 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
       }
       draw_set_mapped_vertex_buffer(draw, i, buf, size);
    }
+   gpgpusim_saveIntrinsic(draws->start, draws->index_bias, info->start_instance, info->instance_count);
 
+   float minDepth = lp->viewports[0].translate[2];
+   float maxDepth = 1 * lp->viewports[0].scale[2] + lp->viewports[0].translate[2];
+   
+   gpgpusim_saveViewport(lp->framebuffer.width, lp->framebuffer.height, 0, 0, lp->depth_stencil->depth_func, minDepth, maxDepth);
    /* Map index buffer, if present */
    if (info->index_size) {
       unsigned available_space = ~0;

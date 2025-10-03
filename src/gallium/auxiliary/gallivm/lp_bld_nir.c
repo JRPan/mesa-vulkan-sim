@@ -2133,6 +2133,7 @@ visit_intrinsic(struct lp_build_nir_context *bld_base,
    case nir_intrinsic_load_subgroup_invocation:
    case nir_intrinsic_load_subgroup_id:
    case nir_intrinsic_load_num_subgroups:
+   case nir_intrinsic_load_vertex_id_zero_base:
       bld_base->sysval_intrin(bld_base, instr, result);
       break;
    case nir_intrinsic_load_helper_invocation:

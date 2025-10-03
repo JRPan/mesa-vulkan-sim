@@ -56,7 +56,7 @@ extern void gpgpusim_vkCmdTraceRaysKHR(
                       uint64_t launch_size_addr);
 
 extern void gpgpusim_setDescriptor(uint32_t setID, uint32_t descID, void *address, uint32_t size, VkDescriptorType type);
-extern void gpgpusim_setDescriptorSet(struct lvp_descriptor_set *set);
+extern void gpgpusim_setDescriptorSet(unsigned index, struct lvp_descriptor_set *set);
 
 // For trace runner
 extern void gpgpusim_addTreelets_cpp(VkAccelerationStructureKHR accelerationStructure);
@@ -84,4 +84,6 @@ extern void gpgpusim_saveVertexInfo(unsigned location, unsigned binding, unsigne
 extern void gpgpusim_saveInstance(unsigned instanceCount, unsigned startInstance);
 extern void gpgpusim_savePipeCtx(void *ctx);
 extern void gpgpusim_saveUBO(unsigned stage, unsigned index, unsigned offset, unsigned size, void *addr);
+extern void gpgpusim_saveIntrinsic(unsigned StartVertex, unsigned BaseVertex, unsigned instanceCount, unsigned startInstance);
+extern void gpgpusim_saveViewport(float width, float height, float x, float y, unsigned depthcmpOp, float min_depth, float max_depth);
 #endif /* GPGPUSIM_CALLS_FROM_MESA_H */

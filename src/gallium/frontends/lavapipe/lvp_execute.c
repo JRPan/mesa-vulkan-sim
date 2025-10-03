@@ -1548,7 +1548,7 @@ static void handle_raytrace_descriptor_sets(struct vk_cmd_queue_entry *cmd,
       increment_dyn_info(dyn_info, layout->vk.set_layouts[bds->first_set + i], true);
 
       printf("LVP: Setting descriptor set pointer 0x%x...\n", (unsigned int)set);
-      gpgpusim_setDescriptorSet(set);
+      gpgpusim_setDescriptorSet(bds->first_set + i, set);
    }
 }
 static void handle_compute_descriptor_sets(struct vk_cmd_queue_entry *cmd,
@@ -1634,7 +1634,7 @@ static void handle_descriptor_sets(struct vk_cmd_queue_entry *cmd,
          handle_set_stage(state, &dyn_info, set, MESA_SHADER_MESH, MESA_SHADER_MESH);
 
       increment_dyn_info(&dyn_info, layout->vk.set_layouts[bds->first_set + i], true);
-      gpgpusim_setDescriptorSet(set);
+      gpgpusim_setDescriptorSet(bds->first_set + i, set);
    }
 }
 

@@ -225,8 +225,12 @@ def translate_deref_instructions(ptx_shader):
 
             if baseType == 'descriptor':
                 # FIX: HARDCODED STRIDE SIZE OF LVP_DESCRIPTOR
+                print("WARNING: HARDCODED STRIDE SIZE OF LVP_DESCRIPTOR")
+                exit(1)
                 arrayStride = str(48)
-
+            elif type == 'function_temp':
+                arrayStride = str(8)
+            print(line.fullLine)
             assert int(arrayStride) != 0
 
             declaration, _ = ptx_shader.findDeclaration(dst)
@@ -387,6 +391,20 @@ def translate_deref_instructions(ptx_shader):
             dst, src0, src2, reg0, reg1, reg2, reg3, reg4 = line.args
             newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
             line.buildString(line.functionalType, newDstNames + [src0, src2, reg0, reg1, reg2, reg3, "0"])
+        elif line.functionalType == FunctionalType.load_push_constant:
+            dst, src0, src2, reg0, reg1, reg2 = line.args
+            declaration, _ = ptx_shader.findDeclaration(dst)
+            if(declaration.isVector()):
+                newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
+                line.buildString(line.functionalType, newDstNames + [src0, src2, reg0, reg1, reg2])
+            else:
+                line.buildString(line.functionalType, [dst, src0, src2, reg0, reg1, reg2])
+        elif line.functionalType == FunctionalType.load_first_vertex:
+            dst = line.args
+            line.buildString(line.functionalType, dst)
+        elif line.functionalType == FunctionalType.load_vertex_id_zero_base:
+            dst = line.args
+            line.buildString(line.functionalType, dst)
 
 def translate_trace_ray(ptx_shader, shaderIDs):
     trace_ray_ID = 0
