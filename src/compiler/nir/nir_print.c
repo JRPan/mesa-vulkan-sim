@@ -3687,6 +3687,17 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = UINT;
       }
+      else if (!strcmp(nir_op_infos[instr->op].name, "ffract")) {
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+
+         fprintf(fp, "cvt.rmi.f32.f32 ");
+
+         ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
+      }
       else {
          fprintf(fp, "// Untranslated NIR instruction ");
       }
@@ -3707,6 +3718,24 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
       }
 
       fprintf(fp, ";");
+
+      if (!strcmp(nir_op_infos[instr->op].name, "ffract")) {
+         // ffract is lowered to 2 PTX, cvt and subtract
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
+         
+         // cvt.rmi.f32.f32 dest, src0;
+         // sub.f32 dest, src0, dest;
+         // dest = src0 - cvt.rmi.f32.f32(src0)
+         fprintf(fp, "sub.f32 ");
+
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ", ");
+         print_alu_src_as_ptx(instr, 0, state);
+         fprintf(fp, ", ");
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+      fprintf(fp, ";");
+      }
    }
    else { // Special case to handle vec2, vec3, etc...
       int src_reg_idx = instr->src[0].src.ssa->index;
