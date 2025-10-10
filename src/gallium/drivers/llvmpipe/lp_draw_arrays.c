@@ -217,13 +217,16 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
       }
       if (buf != NULL) {
          gpgpusim_bindVertex(i, (float *)buf, size, lp->vertex_buffer[i].stride);
-         assert(lp->velems->velem[i].vertex_buffer_index == i);
-         gpgpusim_saveVertexInfo(lp->velems->velem[i].vertex_buffer_index,
-                                 lp->velems->velem[i].vertex_buffer_index,
-                                 lp->velems->velem[i].src_offset,
-                                 lp->velems->velem[i].instance_divisor);
       }
       draw_set_mapped_vertex_buffer(draw, i, buf, size);
+   }
+
+   /* Bind vertex attributes (elements) info to GPGPU-Sim */
+   for (i = 0; i < lp->velems->count; i++) {
+      gpgpusim_saveVertexInfo(i,
+                              lp->velems->velem[i].vertex_buffer_index,
+                              lp->velems->velem[i].src_offset,
+                              lp->velems->velem[i].instance_divisor);
    }
    gpgpusim_saveIntrinsic(draws->start, draws->index_bias, info->start_instance, info->instance_count);
 
