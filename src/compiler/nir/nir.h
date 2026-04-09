@@ -44,6 +44,7 @@
 #include "compiler/nir_types.h"
 #include "compiler/shader_enums.h"
 #include "compiler/shader_info.h"
+#include <X11/Xlib.h>
 #define XXH_INLINE_ALL
 #include "util/xxhash.h"
 #include <stdio.h>
@@ -679,6 +680,10 @@ typedef struct nir_variable {
        * output index for dual source blending.
        */
       unsigned index;
+
+      bool remapped;
+      unsigned original_descriptor_set;
+      unsigned original_binding;
 
       /**
        * Initial binding point for a sampler or UBO.

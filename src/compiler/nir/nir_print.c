@@ -3734,7 +3734,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          print_alu_src_as_ptx(instr, 0, state);
          fprintf(fp, ", ");
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-      fprintf(fp, ";");
+         fprintf(fp, ";"); 
       }
    }
    else { // Special case to handle vec2, vec3, etc...
@@ -5308,9 +5308,12 @@ print_var_decl_as_ptx(nir_variable *var, print_state *state)
       }
    }
 
+   unsigned set = var->data.remapped? var->data.original_descriptor_set : var->data.descriptor_set;
+   unsigned binding = var->data.remapped? var->data.original_binding : var->data.binding;
+
    fprintf(fp, "decl_var %s, %d, %d, %d, %d, %u, %u, %u, %s%s;\t", var->name, size,
            glsl_get_vector_elements(var->type), glsl_get_base_type(var->type), var->data.mode,
-           var->data.driver_location, var->data.descriptor_set, var->data.binding,
+           var->data.driver_location, set, binding,
            loc ? loc : "UNDEFINED", components ? components : "");
 
    // if ((var->data.mode == nir_var_shader_temp) ||

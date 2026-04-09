@@ -351,6 +351,9 @@ void lvp_lower_pipeline_layout(const struct lvp_device *device,
       const struct lvp_descriptor_set_binding_layout *binding =
          get_binding_layout(layout, desc_set_idx, binding_idx);
       int value = 0;
+      var->data.remapped = true;
+      var->data.original_descriptor_set = var->data.descriptor_set;
+      var->data.original_binding = var->data.binding;
       var->data.descriptor_set = 0;
       if (base_type == GLSL_TYPE_SAMPLER || base_type == GLSL_TYPE_TEXTURE) {
          if (binding->type == VK_DESCRIPTOR_TYPE_SAMPLER) {
@@ -371,6 +374,8 @@ void lvp_lower_pipeline_layout(const struct lvp_device *device,
          var->data.binding = value;
       }
       if (base_type == GLSL_TYPE_IMAGE) {
+         // original_descriptor_set and original_binding already saved above (lines 354-356)
+         // Do NOT re-save here — descriptor_set is already remapped to 0
          var->data.descriptor_set = 0;
          for (unsigned s = 0; s < desc_set_idx; s++) {
            if (!layout->vk.set_layouts[s])
