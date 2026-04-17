@@ -198,6 +198,11 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
             const void *buf = llvmpipe_resource_data(lp->constants[stage][index].buffer);
             size_t size = lp->constants[stage][index].buffer_size;
             unsigned offset = lp->constants[stage][index].buffer_offset;
+            gpgpusim_saveUBO(stage, index, offset, size, (void*)buf);
+         } else if (lp->constants[stage][index].pmem) {
+            void *buf = lp->constants[stage][index].pmem;
+            size_t size = lp->constants[stage][index].buffer_size;
+            unsigned offset = lp->constants[stage][index].buffer_offset;
             gpgpusim_saveUBO(stage, index, offset, size, buf);
          }
       }
@@ -207,7 +212,7 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
    for (i = 0; i < lp->num_vertex_buffers; i++) {
       const void *buf = lp->vertex_buffer[i].is_user_buffer ?
                            lp->vertex_buffer[i].buffer.user : NULL;
-      size_t size = ~0;
+      size_t size = 0;
       if (!buf) {
          if (!lp->vertex_buffer[i].buffer.resource) {
             continue;
@@ -215,7 +220,7 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
          buf = llvmpipe_resource_data(lp->vertex_buffer[i].buffer.resource);
          size = lp->vertex_buffer[i].buffer.resource->width0;
       }
-      if (buf != NULL) {
+      if (buf != NULL && size > 0) {
          gpgpusim_bindVertex(i, (float *)buf, size, lp->vertex_buffer[i].stride);
       }
       draw_set_mapped_vertex_buffer(draw, i, buf, size);
@@ -223,6 +228,8 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
 
    /* Bind vertex attributes (elements) info to GPGPU-Sim */
    for (i = 0; i < lp->velems->count; i++) {
+      if (lp->velems->velem[i].src_format == PIPE_FORMAT_NONE)
+         continue; /* skip gaps in attribute locations */
       gpgpusim_saveVertexInfo(i,
                               lp->velems->velem[i].vertex_buffer_index,
                               lp->velems->velem[i].src_offset,
@@ -246,6 +253,9 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
                        (ubyte *) mapped_indices,
                        info->index_size, available_space);
       gpgpusim_saveIndexBuffer((void *)mapped_indices, info->index_size, available_space);
+   } else {
+      /* Non-indexed draw: pass vertex count via saveIndexBuffer with index_size=0 */
+      gpgpusim_saveIndexBuffer(NULL, 0, draws->count);
    }
 
    llvmpipe_prepare_vertex_sampling(lp,

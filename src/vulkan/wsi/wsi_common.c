@@ -1431,11 +1431,21 @@ wsi_common_queue_present(const struct wsi_device *wsi,
    return final_result;
 }
 
+static unsigned gpgpusim_present_count = 0;
+
 VKAPI_ATTR VkResult VKAPI_CALL
 wsi_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
 {
    MESA_TRACE_FUNC();
    VK_FROM_HANDLE(vk_queue, queue, _queue);
+
+   printf("LVP: QueuePresent #%u\n", gpgpusim_present_count);
+   gpgpusim_present_count++;
+
+   if (gpgpusim_present_count >= 2) {
+      printf("LVP: Captured 1 frame, exiting.\n");
+      exit(0);
+   }
 
    return wsi_common_queue_present(queue->base.device->physical->wsi_device,
                                    vk_device_to_handle(queue->base.device),

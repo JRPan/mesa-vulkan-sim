@@ -389,8 +389,12 @@ def translate_deref_instructions(ptx_shader):
         #             line.buildString('add%s' % variableType, (line.args[0], line.args[1], zero))
         elif line.functionalType == FunctionalType.load_ubo:
             dst, src0, src2, reg0, reg1, reg2, reg3, reg4 = line.args
-            newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
-            line.buildString(line.functionalType, newDstNames + [src0, src2, reg0, reg1, reg2, reg3, "0"])
+            declaration, _ = ptx_shader.findDeclaration(dst)
+            if(declaration.isVector()):
+                newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
+                line.buildString(line.functionalType, newDstNames + [src0, src2, reg0, reg1, reg2, reg3, "0"])
+            else:
+                line.buildString(line.functionalType, [dst, src0, src2, reg0, reg1, reg2, reg3, "0"])
         elif line.functionalType == FunctionalType.load_push_constant:
             dst, src0, src2, reg0, reg1, reg2 = line.args
             declaration, _ = ptx_shader.findDeclaration(dst)
