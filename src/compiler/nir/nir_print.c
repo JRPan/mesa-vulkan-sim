@@ -3429,7 +3429,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "ige")) {
+      else if (!strncmp(nir_op_infos[instr->op].name, "ige", 3)) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
@@ -3439,7 +3439,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "ieq")) {
+      else if (!strncmp(nir_op_infos[instr->op].name, "ieq", 3)) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
@@ -3450,7 +3450,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "ine")) {
+      else if (!strncmp(nir_op_infos[instr->op].name, "ine", 3)) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
@@ -3461,7 +3461,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "ilt")) {
+      else if (!strncmp(nir_op_infos[instr->op].name, "ilt", 3)) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
@@ -3472,7 +3472,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "ult")) {
+      else if (!strncmp(nir_op_infos[instr->op].name, "ult", 3)) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
@@ -3483,7 +3483,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "uge")) {
+      else if (!strncmp(nir_op_infos[instr->op].name, "uge", 3)) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
@@ -3494,7 +3494,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "flt")) {
+      else if (!strncmp(nir_op_infos[instr->op].name, "flt", 3)) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
@@ -3505,7 +3505,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "fge")) {
+      else if (!strncmp(nir_op_infos[instr->op].name, "fge", 3)) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
@@ -3516,7 +3516,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "feq")) {
+      else if (!strncmp(nir_op_infos[instr->op].name, "feq", 3)) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
@@ -3571,7 +3571,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "fneu")) {
+      else if (!strncmp(nir_op_infos[instr->op].name, "fneu", 4)) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
