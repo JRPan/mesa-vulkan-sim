@@ -1106,6 +1106,75 @@ def translate_phi(ptx_shader):
         src0Decleration, _ = ptx_shader.findDeclaration(src0)
         src1Decleration, _ = ptx_shader.findDeclaration(src1)
 
+        # If declarations not found, they were unwrapped into components
+        # (e.g. %ssa_8 -> %ssa_8_0, %ssa_8_1). Handle per-component.
+        if src0Decleration is None or src1Decleration is None or dstDecleration is None:
+            # Find component declarations to determine vector size and type
+            comp0, _ = ptx_shader.findDeclaration(src0 + "_0") if src0Decleration is None else (src0Decleration, None)
+            comp1, _ = ptx_shader.findDeclaration(src1 + "_0") if src1Decleration is None else (src1Decleration, None)
+            compDst, _ = ptx_shader.findDeclaration(dst + "_0") if dstDecleration is None else (dstDecleration, None)
+
+            # Determine type from whichever component we found
+            variableType = None
+            for c in [comp0, comp1, compDst]:
+                if c is not None:
+                    variableType = c.variableType
+                    break
+            if variableType is None:
+                print(f"ERROR: cannot resolve phi types for {line.fullLine}, skipping")
+                continue
+
+            # Determine vector size by counting components
+            vecSize = 0
+            while True:
+                d, _ = ptx_shader.findDeclaration(dst + "_" + str(vecSize))
+                if d is None and dstDecleration is None:
+                    break
+                elif d is None and dstDecleration is not None:
+                    vecSize = 1
+                    break
+                vecSize += 1
+            if vecSize == 0:
+                vecSize = 1  # scalar fallback
+
+            # Generate per-component phi movs with declarations
+            for comp in range(vecSize):
+                suffix = "_" + str(comp) if vecSize > 1 else ""
+                dstComp = dst + suffix
+                src0Comp = src0 + suffix
+                src1Comp = src1 + suffix
+
+                # Add declaration before mov if not already declared in that block
+                dstDecl0 = PTXDecleration()
+                dstDecl0.leadingWhiteSpace = line.leadingWhiteSpace
+                dstDecl0.buildString(DeclarationType.Register, None, variableType, dstComp)
+
+                src0Mov = PTXFunctionalLine()
+                src0Mov.leadingWhiteSpace = line.leadingWhiteSpace
+                src0Mov.comment = line.comment
+                src0Mov.buildString('mov%s' % variableType, (dstComp, src0Comp))
+
+                src1Mov = PTXFunctionalLine()
+                src1Mov.leadingWhiteSpace = line.leadingWhiteSpace
+                src1Mov.comment = line.comment
+                src1Mov.buildString('mov%s' % variableType, (dstComp, src1Comp))
+
+                # Remove existing declaration (if any) and re-add at function entry
+                # to ensure declare-before-use ordering for phi movs
+                existingDecl, existingIdx = ptx_shader.findDeclaration(dstComp)
+                if existingDecl is not None:
+                    ptx_shader.lines.remove(existingDecl)
+                for insertIdx in range(len(ptx_shader.lines)):
+                    if '.entry' in ptx_shader.lines[insertIdx].fullLine:
+                        ptx_shader.lines.insert(insertIdx + 1, dstDecl0)
+                        break
+
+                ptx_shader.addToEndOfBlock([src0Mov], blockName0)
+                ptx_shader.addToEndOfBlock([src1Mov], blockName1)
+
+            ptx_shader.lines.remove(line)
+            continue
+
         if len(line.args) == 7:
             src2Decleration, _ = ptx_shader.findDeclaration(src2)
 
