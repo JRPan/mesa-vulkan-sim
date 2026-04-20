@@ -2299,7 +2299,9 @@ print_ptx_reg_decl(print_state *state, int vec_length, val_type type, int num_bi
       fprintf(fp, ".v4 ");
    }
    else if (vec_length > 4){
-      abort();
+      // PTX only supports .v2/.v4, but translate_vector_operands splits
+      // into per-component scalars before ptxas sees the file.
+      fprintf(fp, ".v%d ", vec_length);
    }
 
    switch (type) {

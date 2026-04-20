@@ -58,6 +58,8 @@ def vector_suffix_number(x):
         return 2
     elif x == 'w':
         return 3
+    elif x in 'abcdefghijklmnop':
+        return ord(x) - ord('a') + 4  # a=4, b=5, ..., p=19
 
 
 
