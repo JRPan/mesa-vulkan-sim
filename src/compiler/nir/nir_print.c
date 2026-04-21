@@ -3103,14 +3103,8 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 {
    FILE *fp = state->fp;
 
-   // Skip ALU instructions with non-SSA dest or non-SSA sources
-   if (!instr->dest.dest.is_ssa) {
-      fprintf(fp, "\t// Untranslated NIR ALU (non-SSA dest): %s\n", nir_op_infos[instr->op].name);
-      return;
-   }
-
    bool is_vec_type = (!strcmp(nir_op_infos[instr->op].name, "vec2") ||
-                       !strcmp(nir_op_infos[instr->op].name, "vec3") ||
+                       !strcmp(nir_op_infos[instr->op].name, "vec3") || 
                        !strcmp(nir_op_infos[instr->op].name, "vec4"));
 
    // PTX here
@@ -3443,7 +3437,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
-         fprintf(fp, "setp.ge.s%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ge.s%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3454,7 +3448,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.eq.s%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.eq.s%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3465,7 +3459,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.ne.s%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ne.s%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3476,7 +3470,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.lt.s%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.lt.s%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3487,7 +3481,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.lt.u%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.lt.u%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3498,7 +3492,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.ge.u%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ge.u%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3509,7 +3503,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.lt.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.lt.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3520,7 +3514,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.ge.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ge.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3531,7 +3525,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.eq.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.eq.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3542,7 +3536,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.eq.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.eq.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3553,7 +3547,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.lt.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.lt.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3564,7 +3558,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.ge.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ge.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3586,7 +3580,7 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.ne.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ne.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3647,13 +3641,9 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
       }
       else if (!strcmp(nir_op_infos[instr->op].name, "mov")) { // need to get type of the src operands
-         val_type ssa_reg_type = BITS;
-         int num_bits = instr->dest.dest.ssa.bit_size;
-         if (instr->src[0].src.is_ssa) {
-            int src_reg_idx = instr->src[0].src.ssa->index;
-            ssa_reg_type = ssa_register_info[src_reg_idx].type;
-            num_bits = ssa_register_info[src_reg_idx].num_bits;
-         }
+         int src_reg_idx = instr->src[0].src.ssa->index;
+         val_type ssa_reg_type = ssa_register_info[src_reg_idx].type;
+         int num_bits = ssa_register_info[src_reg_idx].num_bits;
 
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, ssa_reg_type, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
@@ -3772,13 +3762,9 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
       }
    }
    else { // Special case to handle vec2, vec3, etc...
-      val_type ssa_reg_type = FLOAT;
-      int num_bits = instr->dest.dest.ssa.bit_size;
-      if (instr->src[0].src.is_ssa) {
-         int src_reg_idx = instr->src[0].src.ssa->index;
-         ssa_reg_type = ssa_register_info[src_reg_idx].type;
-         num_bits = ssa_register_info[src_reg_idx].num_bits;
-      }
+      int src_reg_idx = instr->src[0].src.ssa->index;
+      val_type ssa_reg_type = ssa_register_info[src_reg_idx].type;
+      int num_bits = ssa_register_info[src_reg_idx].num_bits;
 
       ssa_register_info[instr->dest.dest.ssa.index].type = ssa_reg_type;
 
@@ -5484,9 +5470,8 @@ print_ptx_function_impl(nir_function_impl *impl, print_state *state, gl_shader_s
 
    nir_index_blocks(impl);
 
-   nir_index_ssa_defs(impl);
-   unsigned ssa_count = impl->ssa_alloc > 50000 ? impl->ssa_alloc : 50000;
-   ssa_reg_info *ssa_register_info = calloc(ssa_count, sizeof(*ssa_register_info));
+   ssa_reg_info *ssa_register_info = malloc(sizeof(*ssa_register_info) * 5000);
+   memset(ssa_register_info, 0, sizeof(*ssa_register_info) * 5000);
 
    foreach_list_typed(nir_cf_node, node, node, &impl->body) {
       print_cf_node_as_ptx(node, state, ssa_register_info, 1);
