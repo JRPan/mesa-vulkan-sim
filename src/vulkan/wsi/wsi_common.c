@@ -1447,6 +1447,8 @@ wsi_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
    const char *exit_after = getenv("GPGPUSIM_EXIT_AFTER_PRESENTS");
    const unsigned exit_at = exit_after && atoi(exit_after) > 0 ? atoi(exit_after) : 2;
    if (gpgpusim_present_count >= exit_at) {
+      /* the queue thread may still be simulating this frame's draws */
+      queue->base.device->dispatch_table.QueueWaitIdle(_queue);
       printf("LVP: reached %u presents, exiting.\n", exit_at);
       exit(0);
    }
