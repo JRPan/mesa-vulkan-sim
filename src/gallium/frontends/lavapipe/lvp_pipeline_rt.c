@@ -79,6 +79,8 @@ static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath)
 
 static void run_rt_translation_passes()
 {
+   /* ptx_lower_instructions.py hard-codes this as the descriptor-array stride */
+   STATIC_ASSERT(sizeof(struct lvp_descriptor) == 48);
    char *mesa_root = getenv("MESA_ROOT");
    char *filePath = "gpgpusimShaders/";
 

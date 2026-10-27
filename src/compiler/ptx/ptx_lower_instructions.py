@@ -58,8 +58,6 @@ def vector_suffix_number(x):
         return 2
     elif x == 'w':
         return 3
-    elif x in 'abcdefghijklmnop':
-        return ord(x) - ord('a') + 4  # a=4, b=5, ..., p=19
 
 
 
@@ -227,12 +225,8 @@ def translate_deref_instructions(ptx_shader):
 
             if baseType == 'descriptor':
                 # FIX: HARDCODED STRIDE SIZE OF LVP_DESCRIPTOR
-                print("WARNING: HARDCODED STRIDE SIZE OF LVP_DESCRIPTOR")
-                exit(1)
                 arrayStride = str(48)
-            elif type == 'function_temp':
-                arrayStride = str(8)
-            print(line.fullLine)
+
             assert int(arrayStride) != 0
 
             declaration, _ = ptx_shader.findDeclaration(dst)
@@ -389,28 +383,6 @@ def translate_deref_instructions(ptx_shader):
         #             if variableType[1] == 'f':
         #                 zero = '0F00000000'
         #             line.buildString('add%s' % variableType, (line.args[0], line.args[1], zero))
-        elif line.functionalType == FunctionalType.load_ubo:
-            dst, src0, src2, reg0, reg1, reg2, reg3, reg4 = line.args
-            declaration, _ = ptx_shader.findDeclaration(dst)
-            if(declaration.isVector()):
-                newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
-                line.buildString(line.functionalType, newDstNames + [src0, src2, reg0, reg1, reg2, reg3, "0"])
-            else:
-                line.buildString(line.functionalType, [dst, src0, src2, reg0, reg1, reg2, reg3, "0"])
-        elif line.functionalType == FunctionalType.load_push_constant:
-            dst, src0, src2, reg0, reg1, reg2 = line.args
-            declaration, _ = ptx_shader.findDeclaration(dst)
-            if(declaration.isVector()):
-                newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
-                line.buildString(line.functionalType, newDstNames + [src0, src2, reg0, reg1, reg2])
-            else:
-                line.buildString(line.functionalType, [dst, src0, src2, reg0, reg1, reg2])
-        elif line.functionalType == FunctionalType.load_first_vertex:
-            dst = line.args
-            line.buildString(line.functionalType, dst)
-        elif line.functionalType == FunctionalType.load_vertex_id_zero_base:
-            dst = line.args
-            line.buildString(line.functionalType, dst)
 
 def translate_trace_ray(ptx_shader, shaderIDs):
     trace_ray_ID = 0
@@ -862,7 +834,7 @@ def translate_decl_var(ptx_shader):
         # debug_print(line.args)
         # exit(-1)
 
-        name, size, vector_number, variable_type, storage_qualifier_type, driver_location, descriptor_set, binding, drivername = line.args
+        name, size, vector_number, variable_type, storage_qualifier_type, driver_location, binding = line.args
         name = '%' + name
         # if int(vector_number) > 1:
         #     continue
@@ -882,12 +854,12 @@ def translate_decl_var(ptx_shader):
             newLine = PTXFunctionalLine()
             newLine.leadingWhiteSpace = '\t'
             newLine.comment = line.comment
-            newLine.buildString('load_vulkan_descriptor', (name, descriptor_set, binding))
+            newLine.buildString('load_vulkan_descriptor', (name, driver_location, binding))
         else:
             newLine = PTXFunctionalLine()
             newLine.leadingWhiteSpace = '\t'
             newLine.comment = line.comment
-            newLine.buildString('rt_alloc_mem', (name, str(allocation_size), str(storage_qualifier_type), str(driver_location), drivername))
+            newLine.buildString('rt_alloc_mem', (name, str(allocation_size), str(storage_qualifier_type)))
 
         new_declerations.append(newReg)
         # new_declerations.append(newSizeSet)
@@ -1107,75 +1079,6 @@ def translate_phi(ptx_shader):
         debug_print(src1)
         src0Decleration, _ = ptx_shader.findDeclaration(src0)
         src1Decleration, _ = ptx_shader.findDeclaration(src1)
-
-        # If declarations not found, they were unwrapped into components
-        # (e.g. %ssa_8 -> %ssa_8_0, %ssa_8_1). Handle per-component.
-        if src0Decleration is None or src1Decleration is None or dstDecleration is None:
-            # Find component declarations to determine vector size and type
-            comp0, _ = ptx_shader.findDeclaration(src0 + "_0") if src0Decleration is None else (src0Decleration, None)
-            comp1, _ = ptx_shader.findDeclaration(src1 + "_0") if src1Decleration is None else (src1Decleration, None)
-            compDst, _ = ptx_shader.findDeclaration(dst + "_0") if dstDecleration is None else (dstDecleration, None)
-
-            # Determine type from whichever component we found
-            variableType = None
-            for c in [comp0, comp1, compDst]:
-                if c is not None:
-                    variableType = c.variableType
-                    break
-            if variableType is None:
-                print(f"ERROR: cannot resolve phi types for {line.fullLine}, skipping")
-                continue
-
-            # Determine vector size by counting components
-            vecSize = 0
-            while True:
-                d, _ = ptx_shader.findDeclaration(dst + "_" + str(vecSize))
-                if d is None and dstDecleration is None:
-                    break
-                elif d is None and dstDecleration is not None:
-                    vecSize = 1
-                    break
-                vecSize += 1
-            if vecSize == 0:
-                vecSize = 1  # scalar fallback
-
-            # Generate per-component phi movs with declarations
-            for comp in range(vecSize):
-                suffix = "_" + str(comp) if vecSize > 1 else ""
-                dstComp = dst + suffix
-                src0Comp = src0 + suffix
-                src1Comp = src1 + suffix
-
-                # Add declaration before mov if not already declared in that block
-                dstDecl0 = PTXDecleration()
-                dstDecl0.leadingWhiteSpace = line.leadingWhiteSpace
-                dstDecl0.buildString(DeclarationType.Register, None, variableType, dstComp)
-
-                src0Mov = PTXFunctionalLine()
-                src0Mov.leadingWhiteSpace = line.leadingWhiteSpace
-                src0Mov.comment = line.comment
-                src0Mov.buildString('mov%s' % variableType, (dstComp, src0Comp))
-
-                src1Mov = PTXFunctionalLine()
-                src1Mov.leadingWhiteSpace = line.leadingWhiteSpace
-                src1Mov.comment = line.comment
-                src1Mov.buildString('mov%s' % variableType, (dstComp, src1Comp))
-
-                # Remove existing declaration (if any) and re-add at function entry
-                # to ensure declare-before-use ordering for phi movs
-                existingDecl, existingIdx = ptx_shader.findDeclaration(dstComp)
-                if existingDecl is not None:
-                    ptx_shader.lines.remove(existingDecl)
-                for insertIdx in range(len(ptx_shader.lines)):
-                    if '.entry' in ptx_shader.lines[insertIdx].fullLine:
-                        ptx_shader.lines.insert(insertIdx + 1, dstDecl0)
-                        break
-
-                ptx_shader.addToEndOfBlock([src0Mov], blockName0)
-                ptx_shader.addToEndOfBlock([src1Mov], blockName1)
-
-            ptx_shader.lines.remove(line)
-            continue
 
         if len(line.args) == 7:
             src2Decleration, _ = ptx_shader.findDeclaration(src2)
@@ -1628,17 +1531,11 @@ def translate_texture_instructions(ptx_shader):
             continue
 
         if line.functionalType == FunctionalType.txl:
-            # nir_print.c emits: txl dst, coord, lod, texture, sampler
-            dst, coord, lod, texture, sampler = line.args
+            dst, texture, sampler, coord, lod = line.args
 
             newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
             newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
             line.buildString(line.functionalType, [texture, sampler] + newDstNames + newCoordNames[0:2] + [lod, ])
-        elif line.functionalType == FunctionalType.tex:
-            dst,  coord, texture, sampler = line.args
-            newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
-            newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
-            line.buildString('tex.2d.v4.f32.f32', newDstNames + [texture, sampler] + newCoordNames[0:2])
             
 
 
@@ -1712,9 +1609,6 @@ def main():
 
     shaders = []
     for shaderFile in os.listdir(shaderFolder):
-        # Skip NFS silly-rename (.nfsXXXX) and other non-shader files
-        if not shaderFile.endswith('.ptx'):
-            continue
         shaders.append(PTXShader(os.path.join(shaderFolder, shaderFile)))
     
     shaderIDs = {}

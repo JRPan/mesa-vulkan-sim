@@ -2299,9 +2299,7 @@ print_ptx_reg_decl(print_state *state, int vec_length, val_type type, int num_bi
       fprintf(fp, ".v4 ");
    }
    else if (vec_length > 4){
-      // PTX only supports .v2/.v4, but translate_vector_operands splits
-      // into per-component scalars before ptxas sees the file.
-      fprintf(fp, ".v%d ", vec_length);
+      abort();
    }
 
    switch (type) {
@@ -2386,10 +2384,8 @@ print_src_as_ptx(const nir_src *src, print_state *state)
 {
    if (src->is_ssa)
       print_ssa_use_as_ptx(src->ssa, state);
-   else {
-      fprintf(state->fp, "%%");
+   else
       print_reg_src(&src->reg, state);
-   }
 }
 
 
@@ -2398,10 +2394,8 @@ print_dest_as_ptx(nir_dest *dest, print_state *state, int position)
 {
    if (dest->is_ssa)
       print_ssa_def_as_ptx(&dest->ssa, state, position);
-   else {
-      fprintf(state->fp, "%%");
+   else
       print_reg_dest(&dest->reg, state);
-   }
 }
 
 
@@ -2410,10 +2404,8 @@ print_dest_as_ptx_no_pos(nir_dest *dest, print_state *state)
 {
    if (dest->is_ssa)
       print_ssa_use_as_ptx(&dest->ssa, state);
-   else {
-      fprintf(state->fp, "%%");
+   else
       print_reg_dest(&dest->reg, state);
-   }
 }
 
 static char*
@@ -2674,46 +2666,6 @@ print_intrinsic_instr_as_ptx(nir_intrinsic_instr *instr, print_state *state, ssa
       fprintf(fp, "%s ", info->name); // Intrinsic function name
    }
    else if (!strcmp(info->name, "ignore_ray_intersection")){
-      fprintf(fp, "%s ", info->name); // Intrinsic function name
-   }
-   else if (!strcmp(info->name, "load_ubo")){
-      if (info->has_dest) {
-         ssa_register_info[instr->dest.ssa.index].type = FLOAT;
-         print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
-         print_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";\n");
-         print_tabs(tabs, fp);
-      }
-      fprintf(fp, "%s ", info->name); // Intrinsic function name
-   }
-   else if (!strcmp(info->name, "load_push_constant")){
-      if (info->has_dest) {
-         ssa_register_info[instr->dest.ssa.index].type = FLOAT;
-         print_ptx_reg_decl(state, instr->dest.ssa.num_components, FLOAT, instr->dest.ssa.bit_size);
-         print_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";\n");
-         print_tabs(tabs, fp);
-      }
-      fprintf(fp, "%s ", info->name); // Intrinsic function name
-   }
-   else if (!strcmp(info->name, "load_first_vertex")){
-      if (info->has_dest) {
-         ssa_register_info[instr->dest.ssa.index].type = UINT;
-         print_ptx_reg_decl(state, instr->dest.ssa.num_components, UINT, instr->dest.ssa.bit_size);
-         print_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";\n");
-         print_tabs(tabs, fp);
-      }
-      fprintf(fp, "%s ", info->name); // Intrinsic function name
-   }
-   else if (!strcmp(info->name, "load_vertex_id_zero_base")){
-      if (info->has_dest) {
-         ssa_register_info[instr->dest.ssa.index].type = UINT;
-         print_ptx_reg_decl(state, instr->dest.ssa.num_components, UINT, instr->dest.ssa.bit_size);
-         print_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";\n");
-         print_tabs(tabs, fp);
-      }
       fprintf(fp, "%s ", info->name); // Intrinsic function name
    }
    else {
@@ -3109,79 +3061,8 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 {
    FILE *fp = state->fp;
 
-   // For ALU instructions with non-SSA dest (NIR registers, e.g. loop vars),
-   // emit a generic PTX mov/add/etc. using .b (bits) type. Skip ssa_register_info.
-   if (!instr->dest.dest.is_ssa) {
-      unsigned bits = instr->dest.dest.reg.reg->bit_size;
-      const char *op = nir_op_infos[instr->op].name;
-      // Map NIR op to PTX mnemonic (simple cases)
-      const char *ptx_op = NULL;
-      if (!strcmp(op, "mov"))         ptx_op = "mov";
-      else if (!strcmp(op, "iadd"))   ptx_op = "add.s";
-      else if (!strcmp(op, "isub"))   ptx_op = "sub.s";
-      else if (!strcmp(op, "imul"))   ptx_op = "mul.lo.s";
-      else if (!strcmp(op, "fadd"))   ptx_op = "add.f";
-      else if (!strcmp(op, "fsub"))   ptx_op = "sub.f";
-      else if (!strcmp(op, "fmul"))   ptx_op = "mul.f";
-      else if (!strcmp(op, "iand"))   ptx_op = "and.b";
-      else if (!strcmp(op, "ior"))    ptx_op = "or.b";
-      else if (!strcmp(op, "ixor"))   ptx_op = "xor.b";
-      else if (!strcmp(op, "vec2") || !strcmp(op, "vec3") || !strcmp(op, "vec4"))
-         ptx_op = "vec";
-
-      unsigned components = instr->dest.dest.reg.reg->num_components;
-      unsigned reg_index = instr->dest.dest.reg.reg->index;
-      const char *comp_chars = "xyzw";
-
-      if (ptx_op && strcmp(ptx_op, "vec") != 0) {
-         // Simple unary/binary op — emit per-component for vec dests.
-         // For mov/arithmetic, src component i maps to dest component i.
-         for (unsigned i = 0; i < components; i++) {
-            if (i != 0) { fprintf(fp, "\n"); print_tabs(tabs, fp); }
-            if (!strcmp(op, "mov")) {
-               fprintf(fp, "mov.b%d ", bits);
-            } else {
-               fprintf(fp, "%s%d ", ptx_op, bits);
-            }
-            // Dest: %rN or %rN.x etc.
-            if (components > 1)
-               fprintf(fp, "%%r%u.%c", reg_index, comp_chars[i]);
-            else
-               fprintf(fp, "%%r%u", reg_index);
-            // Srcs: use src component i
-            for (unsigned s = 0; s < nir_op_infos[instr->op].num_inputs; s++) {
-               fprintf(fp, ", ");
-               if (components > 1 && instr->src[s].src.is_ssa &&
-                   instr->src[s].src.ssa->num_components > 1) {
-                  // Multi-component src: use component i
-                  fprintf(fp, "%%ssa_%u.%c", instr->src[s].src.ssa->index, comp_chars[i]);
-               } else if (components > 1 && !instr->src[s].src.is_ssa &&
-                          instr->src[s].src.reg.reg->num_components > 1) {
-                  fprintf(fp, "%%r%u.%c", instr->src[s].src.reg.reg->index, comp_chars[i]);
-               } else {
-                  // Scalar src (broadcast) or we're scalar-to-scalar
-                  print_alu_src_as_ptx(instr, s, state);
-               }
-            }
-            fprintf(fp, ";");
-         }
-      } else if (ptx_op && !strcmp(ptx_op, "vec")) {
-         // Vec construction: each src is one component
-         for (unsigned i = 0; i < components; i++) {
-            if (i != 0) { fprintf(fp, "\n"); print_tabs(tabs, fp); }
-            fprintf(fp, "mov.b%d ", bits);
-            fprintf(fp, "%%r%u.%c, ", reg_index, comp_chars[i]);
-            print_alu_src_as_ptx(instr, i, state);
-            fprintf(fp, ";");
-         }
-      } else {
-         fprintf(fp, "// Unsupported ALU op with non-SSA dest: %s", op);
-      }
-      return;
-   }
-
    bool is_vec_type = (!strcmp(nir_op_infos[instr->op].name, "vec2") ||
-                       !strcmp(nir_op_infos[instr->op].name, "vec3") ||
+                       !strcmp(nir_op_infos[instr->op].name, "vec3") || 
                        !strcmp(nir_op_infos[instr->op].name, "vec4"));
 
    // PTX here
@@ -3328,28 +3209,19 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          ssa_register_info[instr->dest.dest.ssa.index].type = INT;
       }
       else if (!strcmp(nir_op_infos[instr->op].name, "inot")) {
-         // Check if source is a predicate (from setp/compare result)
-         bool src_is_pred = false;
-         if (instr->src[0].src.is_ssa) {
-            unsigned src_idx = instr->src[0].src.ssa->index;
-            if (ssa_register_info[src_idx].type == PREDICATE)
-               src_is_pred = true;
-         }
-         bool is_pred = instr->dest.dest.ssa.bit_size == 1 || src_is_pred;
-
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, is_pred ? PREDICATE : INT, is_pred ? 1 : instr->dest.dest.ssa.bit_size);
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, instr->dest.dest.ssa.bit_size == 1 ? PREDICATE : INT, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         if (is_pred) {
+         if (instr->dest.dest.ssa.bit_size == 1){
             fprintf(fp, "not.pred ");
          } else {
             fprintf(fp, "not.b%d ", instr->dest.dest.ssa.bit_size);
          }
 
-         ssa_register_info[instr->dest.dest.ssa.index].type = is_pred ? PREDICATE : INT;
+         ssa_register_info[instr->dest.dest.ssa.index].type = instr->dest.dest.ssa.bit_size == 1 ? PREDICATE : INT;
       }
       else if (!strcmp(nir_op_infos[instr->op].name, "ior")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, instr->dest.dest.ssa.bit_size == 1 ? PREDICATE : UINT, instr->dest.dest.ssa.bit_size);
@@ -3429,50 +3301,6 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "fsin")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "sin.approx.f%d ", instr->dest.dest.ssa.bit_size);
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
-      }
-      else if (!strcmp(nir_op_infos[instr->op].name, "fcos")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "cos.approx.f%d ", instr->dest.dest.ssa.bit_size);
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
-      }
-      else if (!strcmp(nir_op_infos[instr->op].name, "flog2")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "lg2.approx.f%d ", instr->dest.dest.ssa.bit_size);
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
-      }
-      else if (!strcmp(nir_op_infos[instr->op].name, "fexp2")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "ex2.approx.f%d ", instr->dest.dest.ssa.bit_size);
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
-      }
       else if (!strcmp(nir_op_infos[instr->op].name, "fneg")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
@@ -3517,28 +3345,6 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "ffloor")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "cvt.rmi.f%d.f%d ", instr->dest.dest.ssa.bit_size, instr->dest.dest.ssa.bit_size);
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
-      }
-      else if (!strcmp(nir_op_infos[instr->op].name, "fceil")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "cvt.rpi.f%d.f%d ", instr->dest.dest.ssa.bit_size, instr->dest.dest.ssa.bit_size);
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
-      }
       else if (!strcmp(nir_op_infos[instr->op].name, "fpow")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
@@ -3561,134 +3367,101 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
       }
-      else if (!strncmp(nir_op_infos[instr->op].name, "ige", 3)) {
+      else if (!strcmp(nir_op_infos[instr->op].name, "ige")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
-         fprintf(fp, "setp.ge.s%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ge.s%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strncmp(nir_op_infos[instr->op].name, "ieq", 3)) {
+      else if (!strcmp(nir_op_infos[instr->op].name, "ieq")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.eq.s%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.eq.s%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strncmp(nir_op_infos[instr->op].name, "ine", 3)) {
+      else if (!strcmp(nir_op_infos[instr->op].name, "ine")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.ne.s%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ne.s%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strncmp(nir_op_infos[instr->op].name, "ilt", 3)) {
+      else if (!strcmp(nir_op_infos[instr->op].name, "ilt")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.lt.s%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.lt.s%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strncmp(nir_op_infos[instr->op].name, "ult", 3)) {
+      else if (!strcmp(nir_op_infos[instr->op].name, "ult")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.lt.u%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.lt.u%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strncmp(nir_op_infos[instr->op].name, "uge", 3)) {
+      else if (!strcmp(nir_op_infos[instr->op].name, "uge")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.ge.u%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ge.u%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strncmp(nir_op_infos[instr->op].name, "flt", 3)) {
+      else if (!strcmp(nir_op_infos[instr->op].name, "flt")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.lt.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.lt.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strncmp(nir_op_infos[instr->op].name, "fge", 3)) {
+      else if (!strcmp(nir_op_infos[instr->op].name, "fge")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.ge.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ge.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
-      else if (!strncmp(nir_op_infos[instr->op].name, "feq", 3)) {
+      else if (!strcmp(nir_op_infos[instr->op].name, "feq")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.eq.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
-      }
-      else if (!strcmp(nir_op_infos[instr->op].name, "feq32")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "setp.eq.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
-      }
-      else if (!strcmp(nir_op_infos[instr->op].name, "flt32")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "setp.lt.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
-      }
-      else if (!strcmp(nir_op_infos[instr->op].name, "fge32")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "setp.ge.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.eq.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3703,14 +3476,14 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
       }
-      else if (!strncmp(nir_op_infos[instr->op].name, "fneu", 4)) {
+      else if (!strcmp(nir_op_infos[instr->op].name, "fneu")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, PREDICATE, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
          fprintf(fp, "\n");
          print_tabs(tabs, fp);
 
-         fprintf(fp, "setp.ne.f%d ", (instr->src[0].src.is_ssa ? instr->src[0].src.ssa->bit_size : 32));
+         fprintf(fp, "setp.ne.f%d ", instr->src[0].src.ssa->bit_size);
 
          ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
       }
@@ -3771,54 +3544,36 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
       }
       else if (!strcmp(nir_op_infos[instr->op].name, "mov")) { // need to get type of the src operands
-         // Get source type; handle non-SSA source by falling back to BITS
-         val_type ssa_reg_type = BITS;
-         if (instr->src[0].src.is_ssa) {
-            int src_reg_idx = instr->src[0].src.ssa->index;
-            ssa_reg_type = ssa_register_info[src_reg_idx].type;
-         }
+         int src_reg_idx = instr->src[0].src.ssa->index;
+         val_type ssa_reg_type = ssa_register_info[src_reg_idx].type;
+         int num_bits = ssa_register_info[src_reg_idx].num_bits;
 
-         // Get destination bit_size (works for both SSA and register dests)
-         unsigned dest_bit_size = instr->dest.dest.is_ssa
-            ? instr->dest.dest.ssa.bit_size
-            : instr->dest.dest.reg.reg->bit_size;
-         unsigned dest_num_components = instr->dest.dest.is_ssa
-            ? instr->dest.dest.ssa.num_components
-            : instr->dest.dest.reg.reg->num_components;
-
-         // Emit SSA dest declaration; register dests are pre-declared at function entry
-         if (instr->dest.dest.is_ssa) {
-            print_ptx_reg_decl(state, dest_num_components, ssa_reg_type, dest_bit_size);
-            print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-            fprintf(fp, ";\n");
-            print_tabs(tabs, fp);
-         }
+         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, ssa_reg_type, instr->dest.dest.ssa.bit_size);
+         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
+         fprintf(fp, ";");
+         fprintf(fp, "\n");
+         print_tabs(tabs, fp);
 
          switch (ssa_reg_type) {
             case UINT:
-               fprintf(fp, "mov.u%d ", dest_bit_size);
-               if (instr->dest.dest.is_ssa)
-                  ssa_register_info[instr->dest.dest.ssa.index].type = UINT;
+               fprintf(fp, "mov.u%d ", instr->dest.dest.ssa.bit_size);
+               ssa_register_info[instr->dest.dest.ssa.index].type = UINT;
                break;
             case INT:
-               fprintf(fp, "mov.s%d ", dest_bit_size);
-               if (instr->dest.dest.is_ssa)
-                  ssa_register_info[instr->dest.dest.ssa.index].type = INT;
+               fprintf(fp, "mov.s%d ", instr->dest.dest.ssa.bit_size);
+               ssa_register_info[instr->dest.dest.ssa.index].type = INT;
                break;
             case FLOAT:
-               fprintf(fp, "mov.f%d ", dest_bit_size);
-               if (instr->dest.dest.is_ssa)
-                  ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
+               fprintf(fp, "mov.f%d ", instr->dest.dest.ssa.bit_size);
+               ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
                break;
             case BITS:
-               fprintf(fp, "mov.b%d ", dest_bit_size);
-               if (instr->dest.dest.is_ssa)
-                  ssa_register_info[instr->dest.dest.ssa.index].type = BITS;
+               fprintf(fp, "mov.b%d ", instr->dest.dest.ssa.bit_size);
+               ssa_register_info[instr->dest.dest.ssa.index].type = BITS;
                break;
             case PREDICATE:
                fprintf(fp, "mov.pred ");
-               if (instr->dest.dest.is_ssa)
-                  ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
+               ssa_register_info[instr->dest.dest.ssa.index].type = PREDICATE;
                break;
             case UNDEF:
                printf("Should not be in here!\n");
@@ -3827,17 +3582,6 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
          }
       }
       else if (!strcmp(nir_op_infos[instr->op].name, "bcsel")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "bcsel ");
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
-      }
-      else if (!strcmp(nir_op_infos[instr->op].name, "b32csel")) {
          print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
          print_alu_dest_as_ptx_no_pos(&instr->dest, state);
          fprintf(fp, ";");
@@ -3859,17 +3603,6 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
 
          ssa_register_info[instr->dest.dest.ssa.index].type = UINT;
       }
-      else if (!strcmp(nir_op_infos[instr->op].name, "ffract")) {
-         print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, FLOAT, instr->dest.dest.ssa.bit_size);
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";");
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-
-         fprintf(fp, "cvt.rmi.f32.f32 ");
-
-         ssa_register_info[instr->dest.dest.ssa.index].type = FLOAT;
-      }
       else {
          fprintf(fp, "// Untranslated NIR instruction ");
       }
@@ -3890,49 +3623,19 @@ print_alu_instr_as_ptx(nir_alu_instr *instr, print_state *state, ssa_reg_info *s
       }
 
       fprintf(fp, ";");
-
-      if (!strcmp(nir_op_infos[instr->op].name, "ffract")) {
-         // ffract is lowered to 2 PTX, cvt and subtract
-         fprintf(fp, "\n");
-         print_tabs(tabs, fp);
-         
-         // cvt.rmi.f32.f32 dest, src0;
-         // sub.f32 dest, src0, dest;
-         // dest = src0 - cvt.rmi.f32.f32(src0)
-         fprintf(fp, "sub.f32 ");
-
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ", ");
-         print_alu_src_as_ptx(instr, 0, state);
-         fprintf(fp, ", ");
-         print_alu_dest_as_ptx_no_pos(&instr->dest, state);
-         fprintf(fp, ";"); 
-      }
    }
    else { // Special case to handle vec2, vec3, etc...
-      val_type ssa_reg_type = BITS;
-      int num_bits = instr->dest.dest.is_ssa ? instr->dest.dest.ssa.bit_size : instr->dest.dest.reg.reg->bit_size;
-      if (instr->src[0].src.is_ssa) {
-         int src_reg_idx = instr->src[0].src.ssa->index;
-         ssa_reg_type = ssa_register_info[src_reg_idx].type;
-         num_bits = ssa_register_info[src_reg_idx].num_bits;
-      }
+      int src_reg_idx = instr->src[0].src.ssa->index;
+      val_type ssa_reg_type = ssa_register_info[src_reg_idx].type;
+      int num_bits = ssa_register_info[src_reg_idx].num_bits;
 
-      unsigned dest_num_components = instr->dest.dest.is_ssa
-         ? instr->dest.dest.ssa.num_components
-         : instr->dest.dest.reg.reg->num_components;
-      unsigned dest_bit_size = instr->dest.dest.is_ssa
-         ? instr->dest.dest.ssa.bit_size
-         : instr->dest.dest.reg.reg->bit_size;
+      ssa_register_info[instr->dest.dest.ssa.index].type = ssa_reg_type;
 
-      if (instr->dest.dest.is_ssa) {
-         ssa_register_info[instr->dest.dest.ssa.index].type = ssa_reg_type;
-         print_ptx_reg_decl(state, dest_num_components, ssa_reg_type, dest_bit_size);
-      }
+      print_ptx_reg_decl(state, instr->dest.dest.ssa.num_components, ssa_reg_type, instr->dest.dest.ssa.bit_size);
       print_alu_dest_as_ptx_no_pos(&instr->dest, state);
       fprintf(fp, ";\n");
       print_tabs(tabs, fp);
-      for (unsigned i = 0; i < dest_num_components; i++) {
+      for (unsigned i = 0; i < instr->dest.dest.ssa.num_components; i++) {
          if (i != 0) {
             fprintf(fp, "\n");
             print_tabs(tabs, fp);
@@ -4313,7 +4016,7 @@ print_tex_instr_as_ptx(nir_tex_instr *instr, print_state *state, ssa_reg_info *s
 
    ssa_register_info[instr->dest.ssa.index].type = FLOAT;
 
-   // assert(instr->op == nir_texop_txl);
+   assert(instr->op == nir_texop_txl);
 
    switch (instr->op) {
    case nir_texop_tex:
@@ -4379,15 +4082,10 @@ print_tex_instr_as_ptx(nir_tex_instr *instr, print_state *state, ssa_reg_info *s
       print_src_as_ptx(&instr->src[i].src, state);
    }
 
-   if (instr->op == nir_texop_tex) {
-      fprintf(fp, ", %u ", instr->texture_index);
-      fprintf(fp, ", %u ", instr->sampler_index);
-   }
-
    fprintf(fp, ";");
 
 
-
+   
    // Original NIR
    fprintf(fp, "\t// ");
    print_dest(&instr->dest, state);
@@ -5419,86 +5117,9 @@ print_var_decl_as_ptx(nir_variable *var, print_state *state)
    
    if(size < 4)
       size = 4;
-   
-   const char *loc = NULL;
-   char buf[4];
-   const char *components = NULL;
-   if (var->data.mode == nir_var_shader_in ||
-       var->data.mode == nir_var_shader_out ||
-       var->data.mode == nir_var_uniform ||
-       var->data.mode == nir_var_mem_ubo ||
-       var->data.mode == nir_var_mem_ssbo) {
 
-      switch (state->shader->info.stage) {
-      case MESA_SHADER_VERTEX:
-         if (var->data.mode == nir_var_shader_in)
-            loc = gl_vert_attrib_name(var->data.location);
-         else if (var->data.mode == nir_var_shader_out)
-            loc = gl_varying_slot_name_for_stage(var->data.location,
-                                                 state->shader->info.stage);
-         break;
-      case MESA_SHADER_GEOMETRY:
-         if ((var->data.mode == nir_var_shader_in) ||
-             (var->data.mode == nir_var_shader_out)) {
-            loc = gl_varying_slot_name_for_stage(var->data.location,
-                                                 state->shader->info.stage);
-         }
-         break;
-      case MESA_SHADER_FRAGMENT:
-         if (var->data.mode == nir_var_shader_in) {
-            loc = gl_varying_slot_name_for_stage(var->data.location,
-                                                 state->shader->info.stage);
-         } else if (var->data.mode == nir_var_shader_out) {
-            loc = gl_frag_result_name(var->data.location);
-         }
-         break;
-      case MESA_SHADER_TESS_CTRL:
-      case MESA_SHADER_TESS_EVAL:
-      case MESA_SHADER_COMPUTE:
-      case MESA_SHADER_KERNEL:
-      default:
-         /* TODO */
-         break;
-      }
-
-      if (!loc) {
-         if (var->data.location == ~0) {
-            loc = "~0";
-         } else {
-            snprintf(buf, sizeof(buf), "%u", var->data.location);
-            loc = buf;
-         }
-      }
-
-      /* For shader I/O vars that have been split to components or packed,
-       * print the fractional location within the input/output.
-       */
-      unsigned int num_components =
-         glsl_get_components(glsl_without_array(var->type));
-      char components_local[18] = {'_' /* the rest is 0-filled */};
-      switch (var->data.mode) {
-      case nir_var_shader_in:
-      case nir_var_shader_out:
-         if (num_components < 16 && num_components != 0) {
-            const char *xyzw = comp_mask_string(num_components);
-            for (int i = 0; i < num_components; i++)
-               components_local[i + 1] = xyzw[i + var->data.location_frac];
-
-            components = components_local;
-         }
-         break;
-      default:
-         break;
-      }
-   }
-
-   unsigned set = var->data.remapped? var->data.original_descriptor_set : var->data.descriptor_set;
-   unsigned binding = var->data.remapped? var->data.original_binding : var->data.binding;
-
-   fprintf(fp, "decl_var %s, %d, %d, %d, %d, %u, %u, %u, %s%s;\t", var->name, size,
-           glsl_get_vector_elements(var->type), glsl_get_base_type(var->type), var->data.mode,
-           var->data.driver_location, set, binding,
-           loc ? loc : "UNDEFINED", components ? components : "");
+   fprintf(fp, "decl_var %s, %d, %d, %d, %d, %u, %u;\t", var->name, size, glsl_get_vector_elements(var->type), 
+                  glsl_get_base_type(var->type), var->data.mode, var->data.driver_location, var->data.binding);
 
    // if ((var->data.mode == nir_var_shader_temp) ||
    //       (var->data.mode == nir_var_shader_call_data) ||
@@ -5548,11 +5169,83 @@ print_var_decl_as_ptx(nir_variable *var, print_state *state)
    fprintf(fp, "%s %s", glsl_get_type_name(var->type),
            get_var_name(var, state));
 
-   fprintf(fp, " (%s%s, %u, %u)%s", loc,
+   if (var->data.mode == nir_var_shader_in ||
+       var->data.mode == nir_var_shader_out ||
+       var->data.mode == nir_var_uniform ||
+       var->data.mode == nir_var_mem_ubo ||
+       var->data.mode == nir_var_mem_ssbo) {
+      const char *loc = NULL;
+      char buf[4];
+
+      switch (state->shader->info.stage) {
+      case MESA_SHADER_VERTEX:
+         if (var->data.mode == nir_var_shader_in)
+            loc = gl_vert_attrib_name(var->data.location);
+         else if (var->data.mode == nir_var_shader_out)
+            loc = gl_varying_slot_name_for_stage(var->data.location,
+                                                 state->shader->info.stage);
+         break;
+      case MESA_SHADER_GEOMETRY:
+         if ((var->data.mode == nir_var_shader_in) ||
+             (var->data.mode == nir_var_shader_out)) {
+            loc = gl_varying_slot_name_for_stage(var->data.location,
+                                                 state->shader->info.stage);
+         }
+         break;
+      case MESA_SHADER_FRAGMENT:
+         if (var->data.mode == nir_var_shader_in) {
+            loc = gl_varying_slot_name_for_stage(var->data.location,
+                                                 state->shader->info.stage);
+         } else if (var->data.mode == nir_var_shader_out) {
+            loc = gl_frag_result_name(var->data.location);
+         }
+         break;
+      case MESA_SHADER_TESS_CTRL:
+      case MESA_SHADER_TESS_EVAL:
+      case MESA_SHADER_COMPUTE:
+      case MESA_SHADER_KERNEL:
+      default:
+         /* TODO */
+         break;
+      }
+
+      if (!loc) {
+         if (var->data.location == ~0) {
+            loc = "~0";
+         } else {
+            snprintf(buf, sizeof(buf), "%u", var->data.location);
+            loc = buf;
+         }
+      }
+
+      /* For shader I/O vars that have been split to components or packed,
+       * print the fractional location within the input/output.
+       */
+      unsigned int num_components =
+         glsl_get_components(glsl_without_array(var->type));
+      const char *components = NULL;
+      char components_local[18] = {'.' /* the rest is 0-filled */};
+      switch (var->data.mode) {
+      case nir_var_shader_in:
+      case nir_var_shader_out:
+         if (num_components < 16 && num_components != 0) {
+            const char *xyzw = comp_mask_string(num_components);
+            for (int i = 0; i < num_components; i++)
+               components_local[i + 1] = xyzw[i + var->data.location_frac];
+
+            components = components_local;
+         }
+         break;
+      default:
+         break;
+      }
+
+      fprintf(fp, " (%s%s, %u, %u)%s", loc,
               components ? components : "",
               var->data.driver_location, var->data.binding,
               var->data.compact ? " compact" : "");
-   
+   }
+
    if (var->constant_initializer) {
       fprintf(fp, " = { ");
       print_constant(var->constant_initializer, var->type, state);
@@ -5601,12 +5294,6 @@ print_ptx_function_impl(nir_function_impl *impl, print_state *state, gl_shader_s
       case MESA_SHADER_CALLABLE:
          fprintf(fp, "MESA_SHADER_CALLABLE");
          break;
-      case MESA_SHADER_VERTEX:
-         fprintf(fp, "MESA_SHADER_VERTEX");
-         break;
-      case MESA_SHADER_FRAGMENT:
-         fprintf(fp, "MESA_SHADER_FRAGMENT");
-         break;
       default:
          unreachable("Invalid shader type");
    }
@@ -5623,17 +5310,9 @@ print_ptx_function_impl(nir_function_impl *impl, print_state *state, gl_shader_s
       print_var_decl_as_ptx(var, state);
    }
 
-   // Emit PTX .reg declarations for NIR registers (mutable loop variables)
    foreach_list_typed(nir_register, reg, node, &impl->registers) {
-      fprintf(fp, "\t.reg ");
-      if (reg->num_components == 2) {
-         fprintf(fp, ".v2 ");
-      } else if (reg->num_components > 2 && reg->num_components <= 4) {
-         fprintf(fp, ".v4 ");
-      }
-      // Use .b (bits) type since NIR registers don't carry type info;
-      // will be split per-component by translate_vector_operands if vec2+
-      fprintf(fp, ".b%d %%r%u;\n", reg->bit_size, reg->index);
+      fprintf(fp, "\t");
+      print_register_decl(reg, state);
    }
 
    nir_index_blocks(impl);

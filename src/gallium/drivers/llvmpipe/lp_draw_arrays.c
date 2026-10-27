@@ -51,14 +51,7 @@
 static bool gpgpusim_initialized = false;
 static int shader_ID = 0;
 
-/* GPGPUSIM_LEGACY_PTX=1 selects the old nir_print.c + Python lowering path. */
-static bool use_legacy_ptx(void)
-{
-   const char *v = getenv("GPGPUSIM_LEGACY_PTX");
-   return v && strcmp(v, "0") != 0;
-}
-
-static void translate_nir_to_ptx(nir_shader *shader, nir_shader *ssa_shader, char* shaderPath)
+static void translate_nir_to_ptx(nir_shader *ssa_shader, char* shaderPath)
 {
    FILE *pFile;
    char *mesa_root = getenv("MESA_ROOT");
@@ -68,12 +61,12 @@ static void translate_nir_to_ptx(nir_shader *shader, nir_shader *ssa_shader, cha
    char *extension = ".ptx";
    int id = 0;
    
-   label = shader->info.label;
+   label = ssa_shader->info.label;
    if (!label){
       label = "0";
    }
 
-   switch (shader->info.stage) {
+   switch (ssa_shader->info.stage) {
       case MESA_SHADER_RAYGEN:
          strcpy(fileName, "MESA_SHADER_RAYGEN");
          id = shader_ID;
@@ -131,47 +124,28 @@ static void translate_nir_to_ptx(nir_shader *shader, nir_shader *ssa_shader, cha
       abort();
    }
    printf("GPGPU-SIM VULKAN: Translating NIR %s to PTX\n", fileName);
-   if (use_legacy_ptx()) {
-      nir_translate_shader_to_ptx(shader, pFile, fullPath);
-   } else {
-      assert(ssa_shader && "no SSA NIR clone stashed at shader creation");
-      nir_to_ptx(ssa_shader, pFile, id);
-      fclose(pFile);
-      /* keep a copy (vulkan-sim deletes gpgpusimShaders/ after each draw) */
-      const char *keep = getenv("GPGPUSIM_VERIFY_DIR");
-      if (keep && lp_gpgpusim_verify_enabled()) {
-         char dst[400];
-         snprintf(dst, sizeof(dst), "%s/%s_%d.ptx", keep, fileName, id);
-         FILE *in = fopen(fullPath, "rb"), *out = fopen(dst, "wb");
-         if (in && out) {
-            char buf[65536];
-            size_t n;
-            while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
-               fwrite(buf, 1, n, out);
-         }
-         if (in) fclose(in);
-         if (out) fclose(out);
+   assert(ssa_shader && "no SSA NIR clone stashed at shader creation");
+   nir_to_ptx(ssa_shader, pFile, id);
+   fclose(pFile);
+   /* keep a copy (vulkan-sim deletes gpgpusimShaders/ after each draw) */
+   const char *keep = getenv("GPGPUSIM_VERIFY_DIR");
+   if (keep && lp_gpgpusim_verify_enabled()) {
+      char dst[400];
+      snprintf(dst, sizeof(dst), "%s/%s_%d.ptx", keep, fileName, id);
+      FILE *in = fopen(fullPath, "rb"), *out = fopen(dst, "wb");
+      if (in && out) {
+         char buf[65536];
+         size_t n;
+         while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
+            fwrite(buf, 1, n, out);
       }
+      if (in) fclose(in);
+      if (out) fclose(out);
    }
 
    strcpy(shaderPath, fullPath);
 }
 
-static void run_rt_translation_passes()
-{
-   char *mesa_root = getenv("MESA_ROOT");
-   char *filePath = "gpgpusimShaders/";
-
-   char command[400];
-   snprintf(command, sizeof(command), "python3 %s/src/compiler/ptx/ptx_lower_instructions.py %s%s", mesa_root, mesa_root, filePath);
-   int result = system(command);
-
-   if (result != 0)
-   {
-      printf("MESA: ERROR ** while translating nir to PTX %d\n", result);
-      exit(1);
-   }
-}
 
 
 /**
@@ -244,10 +218,8 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
    if (gpgpusim) {
       char *v_Path = (char *)malloc(200);
       char *f_Path = (char *)malloc(200);
-      translate_nir_to_ptx(lp->vs->state.ir.nir, lp->vs->gpgpusim_nir, v_Path);
-      translate_nir_to_ptx(lp->fs->base.ir.nir, lp->fs->gpgpusim_nir, f_Path);
-      if (use_legacy_ptx())
-         run_rt_translation_passes();
+      translate_nir_to_ptx(lp->vs->gpgpusim_nir, v_Path);
+      translate_nir_to_ptx(lp->fs->gpgpusim_nir, f_Path);
       gpgpusim_registerShader(v_Path, (uint32_t)(MESA_SHADER_VERTEX));
 
       // FRAG
