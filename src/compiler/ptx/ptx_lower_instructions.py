@@ -1628,7 +1628,8 @@ def translate_texture_instructions(ptx_shader):
             continue
 
         if line.functionalType == FunctionalType.txl:
-            dst, texture, sampler, coord, lod = line.args
+            # nir_print.c emits: txl dst, coord, lod, texture, sampler
+            dst, coord, lod, texture, sampler = line.args
 
             newDstNames, _, _, _ = unwrapp_vector(ptx_shader, dst, dst)
             newCoordNames, _, _, _ = unwrapp_vector(ptx_shader, coord, coord)
@@ -1711,6 +1712,9 @@ def main():
 
     shaders = []
     for shaderFile in os.listdir(shaderFolder):
+        # Skip NFS silly-rename (.nfsXXXX) and other non-shader files
+        if not shaderFile.endswith('.ptx'):
+            continue
         shaders.append(PTXShader(os.path.join(shaderFolder, shaderFile)))
     
     shaderIDs = {}

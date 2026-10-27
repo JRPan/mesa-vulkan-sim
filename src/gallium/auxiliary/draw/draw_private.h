@@ -45,6 +45,7 @@
 #include "pipe/p_defines.h"
 
 #include "draw_vertex_header.h"
+#include "draw_context.h"
 
 #ifdef DRAW_LLVM_AVAILABLE
 struct gallivm_state;
@@ -133,6 +134,10 @@ struct draw_buffer_info {
 struct draw_context
 {
    struct pipe_context *pipe;
+
+   /* vulkan-sim verification: sees every VS output batch (read-only) */
+   draw_vs_output_tap_func vs_output_tap;
+   void *vs_output_tap_data;
 
    /** Drawing/primitive pipeline stages */
    struct {

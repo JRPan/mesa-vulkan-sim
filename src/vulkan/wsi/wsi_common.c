@@ -1431,7 +1431,8 @@ wsi_common_queue_present(const struct wsi_device *wsi,
    return final_result;
 }
 
-static unsigned gpgpusim_present_count = 0;
+/* vulkan-sim frame window: llvmpipe's draw path reads this (GPGPUSIM_START_PRESENT) */
+unsigned gpgpusim_present_count = 0;
 
 VKAPI_ATTR VkResult VKAPI_CALL
 wsi_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
@@ -1442,8 +1443,11 @@ wsi_QueuePresentKHR(VkQueue _queue, const VkPresentInfoKHR *pPresentInfo)
    printf("LVP: QueuePresent #%u\n", gpgpusim_present_count);
    gpgpusim_present_count++;
 
-   if (gpgpusim_present_count >= 2) {
-      printf("LVP: Captured 1 frame, exiting.\n");
+   /* GPGPUSIM_EXIT_AFTER_PRESENTS (default 2: the first present ends the frame before) */
+   const char *exit_after = getenv("GPGPUSIM_EXIT_AFTER_PRESENTS");
+   const unsigned exit_at = exit_after && atoi(exit_after) > 0 ? atoi(exit_after) : 2;
+   if (gpgpusim_present_count >= exit_at) {
+      printf("LVP: reached %u presents, exiting.\n", exit_at);
       exit(0);
    }
 

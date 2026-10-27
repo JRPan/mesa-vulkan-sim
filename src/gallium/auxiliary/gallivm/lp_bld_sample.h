@@ -117,6 +117,11 @@ struct lp_sampler_params
    LLVMValueRef aniso_filter_table;
    const struct lp_derivatives *derivs;
    LLVMValueRef *texel;
+   /* optional (vulkan-sim timing): lane 0's mip decision as i32 scalars:
+    * [0] ilevel0, [1] ilevel1 (-1 if none), [2] lod_positive (minify; 2 = not computed),
+    * [3] lod_fpart bits.
+    * Forces inline sampling code. */
+   LLVMValueRef *mip_out;
 };
 
 /* Parameters used to handle sampler_size instructions */

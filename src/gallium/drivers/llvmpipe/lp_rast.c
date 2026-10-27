@@ -25,6 +25,7 @@
  *
  **************************************************************************/
 
+#include "lp_gpgpusim_feed.h"
 #include <limits.h>
 #include "util/u_memory.h"
 #include "util/u_math.h"
@@ -358,6 +359,8 @@ lp_rast_shade_tile(struct lp_rasterizer_task *task,
          task->thread_data.raster_state.viewport_index = inputs->viewport_index;
          task->thread_data.raster_state.view_index = inputs->view_index;
 
+         lp_gpgpusim_feed_record(task, inputs, tile_x + x, tile_y + y, 0xffff);
+
          /* run shader on 4x4 block */
          BEGIN_JIT_CALL(state, task);
          variant->jit_function[RAST_WHOLE](&state->jit_context,
@@ -466,6 +469,8 @@ lp_rast_shade_quads_mask_sample(struct lp_rasterizer_task *task,
       task->thread_data.raster_state.viewport_index = inputs->viewport_index;
       task->thread_data.raster_state.view_index = inputs->view_index;
 
+      lp_gpgpusim_feed_record(task, inputs, x, y, (unsigned)(mask & 0xffff));
+
       /* run shader on 4x4 block */
       BEGIN_JIT_CALL(state, task);
       variant->jit_function[RAST_EDGE_TEST](&state->jit_context,
@@ -525,6 +530,7 @@ lp_rast_blit_tile_to_dest(struct lp_rasterizer_task *task,
       /* This command was partially binned and has been disabled */
       return;
    }
+   lp_gpgpusim_feed_check_unsupported_path("blit_tile_to_dest");
 
    uint8_t *dst = llvmpipe_get_texture_image_address(lpt, face_slice, level);
    if (!dst)

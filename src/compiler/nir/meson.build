@@ -273,6 +273,8 @@ files_libnir = files(
   'nir_phi_builder.c',
   'nir_phi_builder.h',
   'nir_print.c',
+  'nir_to_ptx.c',
+  'nir_to_ptx.h',
   'nir_propagate_invariant.c',
   'nir_range_analysis.c',
   'nir_range_analysis.h',

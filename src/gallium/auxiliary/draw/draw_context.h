@@ -330,6 +330,16 @@ void draw_set_indexes(struct draw_context *draw,
                       const void *elements, unsigned elem_size,
                       unsigned available_space);
 
+/* Called after each VS batch with the shaded vertices (read-only). Vertex i's
+ * index is elts[i] if elts is non-NULL, else start + i. */
+struct vertex_header;
+typedef void (*draw_vs_output_tap_func)(void *data, const struct vertex_header *verts,
+                                        unsigned vertex_stride, unsigned count,
+                                        const unsigned *elts, unsigned start,
+                                        unsigned instance_id);
+void draw_set_vs_output_tap(struct draw_context *draw,
+                            draw_vs_output_tap_func func, void *data);
+
 void draw_set_mapped_vertex_buffer(struct draw_context *draw,
                                    unsigned attr, const void *buffer,
                                    size_t size);

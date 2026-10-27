@@ -3304,7 +3304,8 @@ lp_build_sample_soa_code(struct gallivm_state *gallivm,
                          LLVMValueRef lod, /* optional */
                          LLVMValueRef ms_index, /* optional */
                          LLVMValueRef aniso_filter_table,
-                         LLVMValueRef texel_out[4])
+                         LLVMValueRef texel_out[4],
+                         LLVMValueRef *mip_out /* optional, see lp_sampler_params */)
 {
    assert(static_texture_state);
    assert(static_texture_state->format < PIPE_FORMAT_COUNT);
@@ -3743,6 +3744,26 @@ lp_build_sample_soa_code(struct gallivm_state *gallivm,
          return;
       }
 
+      if (mip_out) {
+         LLVMTypeRef i32 = LLVMInt32TypeInContext(gallivm->context);
+         LLVMValueRef vals[4] = { ilevel0, ilevel1, lod_positive, lod_fpart };
+         const int missing[4] = { -1, -1, 2 /* not computed: min == mag filter */, 0 };
+         for (unsigned i = 0; i < 4; i++) {
+            LLVMValueRef v = vals[i];
+            if (!v) {
+               mip_out[i] = LLVMConstInt(i32, missing[i], 1);
+               continue;
+            }
+            if (LLVMGetTypeKind(LLVMTypeOf(v)) == LLVMVectorTypeKind)
+               v = LLVMBuildExtractElement(builder, v, lp_build_const_int32(gallivm, 0), "");
+            if (LLVMGetTypeKind(LLVMTypeOf(v)) == LLVMFloatTypeKind)
+               v = LLVMBuildBitCast(builder, v, i32, "");
+            else
+               v = LLVMBuildSExtOrBitCast(builder, v, i32, "");
+            mip_out[i] = v;
+         }
+      }
+
       if (use_aos && static_texture_state->target == PIPE_TEXTURE_CUBE_ARRAY) {
          /* The aos path doesn't do seamless filtering so simply add cube layer
           * to face now.
@@ -4105,7 +4126,7 @@ lp_build_sample_gen_func(struct gallivm_state *gallivm,
                             lod,
                             ms_index,
                             aniso_filter_table,
-                            texel_out);
+                            texel_out, NULL);
 
    LLVMBuildAggregateRet(gallivm->builder, texel_out, 4);
 
@@ -4340,7 +4361,7 @@ lp_build_sample_soa(const struct lp_static_texture_state *static_texture_state,
              static_texture_state->level_zero_only == TRUE) &&
             static_sampler_state->min_img_filter == static_sampler_state->mag_img_filter);
 
-      use_tex_func = !(simple_format && simple_tex);
+      use_tex_func = !(simple_format && simple_tex) && !params->mip_out;
    }
 
    if (use_tex_func) {
@@ -4375,7 +4396,8 @@ lp_build_sample_soa(const struct lp_static_texture_state *static_texture_state,
                                params->lod,
                                params->ms_index,
                                params->aniso_filter_table,
-                               params->texel);
+                               params->texel,
+                               params->mip_out);
    }
 }
 

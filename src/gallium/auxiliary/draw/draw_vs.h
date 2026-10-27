@@ -101,6 +101,9 @@ struct draw_vs_variant {
 struct draw_vertex_shader {
    struct draw_context *draw;
 
+   /* vulkan-sim: SSA NIR cloned at creation, before gallivm lowers it in place */
+   struct nir_shader *gpgpusim_nir;
+
    /* This member will disappear shortly:
     */
    struct pipe_shader_state state;

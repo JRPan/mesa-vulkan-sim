@@ -28,6 +28,7 @@
 #ifndef LP_RAST_PRIV_H
 #define LP_RAST_PRIV_H
 
+#include "lp_gpgpusim_feed.h"
 #include "util/format/u_format.h"
 #include "util/u_thread.h"
 #include "gallivm/lp_bld_debug.h"
@@ -267,6 +268,8 @@ lp_rast_shade_quads_all(struct lp_rasterizer_task *task,
       /* Propagate non-interpolated raster state. */
       task->thread_data.raster_state.viewport_index = inputs->viewport_index;
       task->thread_data.raster_state.view_index = inputs->view_index;
+
+      lp_gpgpusim_feed_record(task, inputs, x, y, 0xffff);
 
       /* run shader on 4x4 block */
       BEGIN_JIT_CALL(state, task);

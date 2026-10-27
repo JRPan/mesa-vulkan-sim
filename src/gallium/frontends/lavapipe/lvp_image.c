@@ -22,6 +22,8 @@
  */
 
 #include "lvp_private.h"
+#include "vulkan/wsi/wsi_common.h"
+#include "gpgpusim_calls_from_mesa.h"
 #include "util/format/u_format.h"
 #include "util/u_inlines.h"
 #include "pipe/p_state.h"
@@ -62,6 +64,8 @@ lvp_image_create(VkDevice _device,
       }
 
       template.format = lvp_vk_format_to_pipe_format(pCreateInfo->format);
+      if (vk_find_struct_const(pCreateInfo->pNext, WSI_IMAGE_CREATE_INFO_MESA))
+         template.flags |= LVP_RESOURCE_FLAG_SWAPCHAIN;
 
       bool is_ds = util_format_is_depth_or_stencil(template.format);
 

@@ -982,6 +982,7 @@ do_alu_action(struct lp_build_nir_context *bld_base,
       break;
    case nir_op_imul:
    case nir_op_imul24:
+   case nir_op_amul: /* address multiply: imul semantics (may be left by late I/O lowering) */
       result = lp_build_mul(get_int_bld(bld_base, false, src_bit_size[0]),
                             src[0], src[1]);
       break;

@@ -39,6 +39,8 @@
 #include "util/list.h"
 #include "util/u_upload_mgr.h"
 #include "lp_clear.h"
+#include "lp_gpgpusim_sample.h"
+#include "lp_gpgpusim_blend.h"
 #include "lp_context.h"
 #include "lp_flush.h"
 #include "lp_perf.h"
@@ -55,6 +57,10 @@ llvmpipe_destroy(struct pipe_context *pipe)
    struct llvmpipe_context *llvmpipe = llvmpipe_context(pipe);
    struct llvmpipe_screen *lp_screen = llvmpipe_screen(pipe->screen);
    uint i;
+
+   /* vulkan-sim: JIT'd sample/blend helpers live in this context's LLVM context */
+   lp_gpgpusim_sample_forget_context(llvmpipe);
+   lp_gpgpusim_blend_forget_context(llvmpipe);
 
    mtx_lock(&lp_screen->ctx_mutex);
    list_del(&llvmpipe->list);

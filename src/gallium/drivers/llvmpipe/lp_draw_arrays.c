@@ -44,12 +44,21 @@
 #include "draw/draw_vs.h"
 
 #include "../../frontends/lavapipe/gpgpusim_calls_from_mesa.h"
+#include "compiler/nir/nir_to_ptx.h"
+#include "lp_gpgpusim_verify.h"
 
 
 static bool gpgpusim_initialized = false;
 static int shader_ID = 0;
 
-static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath)
+/* GPGPUSIM_LEGACY_PTX=1 selects the old nir_print.c + Python lowering path. */
+static bool use_legacy_ptx(void)
+{
+   const char *v = getenv("GPGPUSIM_LEGACY_PTX");
+   return v && strcmp(v, "0") != 0;
+}
+
+static void translate_nir_to_ptx(nir_shader *shader, nir_shader *ssa_shader, char* shaderPath)
 {
    FILE *pFile;
    char *mesa_root = getenv("MESA_ROOT");
@@ -117,15 +126,35 @@ static void translate_nir_to_ptx(nir_shader *shader, char* shaderPath)
    system(command);
    
    pFile = fopen (fullPath , "w");
+   if (!pFile) {
+      fprintf(stderr, "gpgpusim: cannot write %s\n", fullPath);
+      abort();
+   }
    printf("GPGPU-SIM VULKAN: Translating NIR %s to PTX\n", fileName);
-   nir_translate_shader_to_ptx(shader, pFile, fullPath);
+   if (use_legacy_ptx()) {
+      nir_translate_shader_to_ptx(shader, pFile, fullPath);
+   } else {
+      assert(ssa_shader && "no SSA NIR clone stashed at shader creation");
+      nir_to_ptx(ssa_shader, pFile, id);
+      fclose(pFile);
+      /* keep a copy (vulkan-sim deletes gpgpusimShaders/ after each draw) */
+      const char *keep = getenv("GPGPUSIM_VERIFY_DIR");
+      if (keep && lp_gpgpusim_verify_enabled()) {
+         char dst[400];
+         snprintf(dst, sizeof(dst), "%s/%s_%d.ptx", keep, fileName, id);
+         FILE *in = fopen(fullPath, "rb"), *out = fopen(dst, "wb");
+         if (in && out) {
+            char buf[65536];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), in)) > 0)
+               fwrite(buf, 1, n, out);
+         }
+         if (in) fclose(in);
+         if (out) fclose(out);
+      }
+   }
 
    strcpy(shaderPath, fullPath);
-
-   // if(1){ // debugging: print out current nir shader
-   //    nir_print_shader(shader, stderr);
-   //    nir_translate_shader_to_ptx(shader, stderr, NULL);
-   // }
 }
 
 static void run_rt_translation_passes()
@@ -163,6 +192,17 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
    if (!indirect && (!draws[0].count || !info->instance_count))
       return;
 
+   /* GPGPUSIM_MAX_INSTANCES caps the real draw, so llvmpipe's golden image and
+    * vulkan-sim render the same instances. Indirect draws re-enter here as
+    * direct draws (util_draw_indirect below), so they are capped too. */
+   struct pipe_draw_info capped_info;
+   const char *max_inst = getenv("GPGPUSIM_MAX_INSTANCES");
+   if (max_inst && atoi(max_inst) > 0 && info->instance_count > (unsigned)atoi(max_inst)) {
+      capped_info = *info;
+      capped_info.instance_count = atoi(max_inst);
+      info = &capped_info;
+   }
+
    struct llvmpipe_context *lp = llvmpipe_context(pipe);
    struct draw_context *draw = lp->draw;
    const void *mapped_indices = NULL;
@@ -182,15 +222,37 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
    /*
     * Map vertex buffers
     */
-   char *v_Path = (char *)malloc(200);
-   char *f_Path = (char *)malloc(200);
-   translate_nir_to_ptx(lp->vs->state.ir.nir, v_Path);
-   translate_nir_to_ptx(lp->fs->base.ir.nir, f_Path);
-   run_rt_translation_passes();
-   gpgpusim_registerShader(v_Path, (uint32_t)(MESA_SHADER_VERTEX));
+   /* Only app shaders (NIR) are simulated; driver-internal draws such as
+    * u_blitter's TGSI shaders (vkCmdBlitImage, mip generation) run on llvmpipe only. */
+   bool renders_to_swapchain = false;
+   for (unsigned cb = 0; cb < lp->framebuffer.nr_cbufs; cb++) {
+      struct pipe_surface *surf = lp->framebuffer.cbufs[cb];
+      if (surf && surf->texture &&
+          (llvmpipe_resource(surf->texture)->dt != NULL ||
+           (surf->texture->flags & LVP_RESOURCE_FLAG_SWAPCHAIN)))
+         renders_to_swapchain = true;
+   }
+   /* GPGPUSIM_SKIP_RTT=1: render-to-texture passes (e.g. precomputed IBL maps)
+    * are left to llvmpipe, so later passes sample correct textures. */
+   /* GPGPUSIM_START_PRESENT: leave loading/splash frames to llvmpipe */
+   extern unsigned gpgpusim_present_count;
+   const char *start_present = getenv("GPGPUSIM_START_PRESENT");
+   const bool in_window = !start_present || gpgpusim_present_count >= (unsigned)atoi(start_present);
+   const char *skip_rtt = getenv("GPGPUSIM_SKIP_RTT");
+   const bool gpgpusim = in_window && lp->vs && lp->vs->gpgpusim_nir && lp->fs && lp->fs->gpgpusim_nir &&
+                         !(skip_rtt && atoi(skip_rtt) && !renders_to_swapchain);
+   if (gpgpusim) {
+      char *v_Path = (char *)malloc(200);
+      char *f_Path = (char *)malloc(200);
+      translate_nir_to_ptx(lp->vs->state.ir.nir, lp->vs->gpgpusim_nir, v_Path);
+      translate_nir_to_ptx(lp->fs->base.ir.nir, lp->fs->gpgpusim_nir, f_Path);
+      if (use_legacy_ptx())
+         run_rt_translation_passes();
+      gpgpusim_registerShader(v_Path, (uint32_t)(MESA_SHADER_VERTEX));
 
-   // FRAG
-   gpgpusim_registerShader(f_Path, (uint32_t)(MESA_SHADER_FRAGMENT));
+      // FRAG
+      gpgpusim_registerShader(f_Path, (uint32_t)(MESA_SHADER_FRAGMENT));
+   }
 
    for (unsigned stage = 0; stage < PIPE_SHADER_MESH_TYPES; stage++) {
       for (unsigned index = 0; index < LP_MAX_TGSI_CONST_BUFFERS; index++) {
@@ -198,12 +260,12 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
             const void *buf = llvmpipe_resource_data(lp->constants[stage][index].buffer);
             size_t size = lp->constants[stage][index].buffer_size;
             unsigned offset = lp->constants[stage][index].buffer_offset;
-            gpgpusim_saveUBO(stage, index, offset, size, (void*)buf);
+            if (gpgpusim) gpgpusim_saveUBO(stage, index, offset, size, (void*)buf);
          } else if (lp->constants[stage][index].pmem) {
             void *buf = lp->constants[stage][index].pmem;
             size_t size = lp->constants[stage][index].buffer_size;
             unsigned offset = lp->constants[stage][index].buffer_offset;
-            gpgpusim_saveUBO(stage, index, offset, size, buf);
+            if (gpgpusim) gpgpusim_saveUBO(stage, index, offset, size, buf);
          }
       }
    }
@@ -221,7 +283,7 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
          size = lp->vertex_buffer[i].buffer.resource->width0;
       }
       if (buf != NULL && size > 0) {
-         gpgpusim_bindVertex(i, (float *)buf, size, lp->vertex_buffer[i].stride);
+         if (gpgpusim) gpgpusim_bindVertex(i, (float *)buf, size, lp->vertex_buffer[i].stride);
       }
       draw_set_mapped_vertex_buffer(draw, i, buf, size);
    }
@@ -230,17 +292,17 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
    for (i = 0; i < lp->velems->count; i++) {
       if (lp->velems->velem[i].src_format == PIPE_FORMAT_NONE)
          continue; /* skip gaps in attribute locations */
-      gpgpusim_saveVertexInfo(i,
+      if (gpgpusim) gpgpusim_saveVertexInfo(i,
                               lp->velems->velem[i].vertex_buffer_index,
                               lp->velems->velem[i].src_offset,
                               lp->velems->velem[i].instance_divisor);
    }
-   gpgpusim_saveIntrinsic(draws->start, draws->index_bias, info->start_instance, info->instance_count);
+   if (gpgpusim) gpgpusim_saveIntrinsic(draws->start, draws->index_bias, info->instance_count, info->start_instance);
 
    float minDepth = lp->viewports[0].translate[2];
    float maxDepth = 1 * lp->viewports[0].scale[2] + lp->viewports[0].translate[2];
    
-   gpgpusim_saveViewport(lp->framebuffer.width, lp->framebuffer.height, 0, 0, lp->depth_stencil->depth_func, minDepth, maxDepth);
+   if (gpgpusim) gpgpusim_saveViewport(lp->framebuffer.width, lp->framebuffer.height, 0, 0, lp->depth_stencil->depth_func, minDepth, maxDepth);
    /* Map index buffer, if present */
    if (info->index_size) {
       unsigned available_space = ~0;
@@ -252,10 +314,10 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
       draw_set_indexes(draw,
                        (ubyte *) mapped_indices,
                        info->index_size, available_space);
-      gpgpusim_saveIndexBuffer((void *)mapped_indices, info->index_size, available_space);
+      if (gpgpusim) gpgpusim_saveIndexBuffer((void *)mapped_indices, info->index_size, available_space);
    } else {
       /* Non-indexed draw: pass vertex count via saveIndexBuffer with index_size=0 */
-      gpgpusim_saveIndexBuffer(NULL, 0, draws->count);
+      if (gpgpusim) gpgpusim_saveIndexBuffer(NULL, 0, draws->count);
    }
 
    llvmpipe_prepare_vertex_sampling(lp,
@@ -299,9 +361,12 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
                                      !lp->queries_disabled);
 
    /* draw! */
-   gpgpusim_saveInstance(info->instance_count, info->start_instance);
-   gpgpusim_savePipeCtx((void *) pipe);
-   gpgpusim_vkCmdDraw();
+   if (gpgpusim) gpgpusim_saveInstance(info->instance_count, info->start_instance);
+   if (gpgpusim) gpgpusim_savePipeCtx((void *) pipe);
+   if (gpgpusim && lp_gpgpusim_verify_enabled())
+      lp_gpgpusim_verify_pre_draw(lp);
+   if (gpgpusim)
+      gpgpusim_vkCmdDraw();
    draw_vbo(draw, info, drawid_offset, indirect, draws, num_draws,
             lp->patch_vertices);
    /*
@@ -338,6 +403,9 @@ llvmpipe_draw_vbo(struct pipe_context *pipe, const struct pipe_draw_info *info,
     * internally when this condition is seen?)
     */
    draw_flush(draw);
+
+   if (gpgpusim && lp_gpgpusim_verify_enabled())
+      lp_gpgpusim_verify_post_draw(lp);
 }
 
 

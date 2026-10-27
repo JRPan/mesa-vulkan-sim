@@ -437,6 +437,15 @@ draw_set_vertex_elements(struct draw_context *draw,
  * Tell drawing context where to find mapped vertex buffers.
  */
 void
+draw_set_vs_output_tap(struct draw_context *draw,
+                       draw_vs_output_tap_func func, void *data)
+{
+   draw->vs_output_tap = func;
+   draw->vs_output_tap_data = data;
+}
+
+
+void
 draw_set_mapped_vertex_buffer(struct draw_context *draw,
                               unsigned attr, const void *buffer,
                               size_t size)

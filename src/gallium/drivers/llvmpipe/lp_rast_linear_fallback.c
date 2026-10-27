@@ -29,6 +29,7 @@
  * Rasterization for binned rectangles within a tile
  */
 
+#include "lp_gpgpusim_feed.h"
 #include <limits.h>
 #include "util/u_math.h"
 #include "lp_debug.h"
@@ -149,6 +150,7 @@ lp_rast_linear_rect_fallback(struct lp_rasterizer_task *task,
                              const struct lp_rast_shader_inputs *inputs,
                              const struct u_rect *box)
 {
+   lp_gpgpusim_feed_check_unsupported_path("linear_rect_fallback");
    /* The interior of the rectangle (if there is one) will be
     * rasterized as full 4x4 stamps.
     *

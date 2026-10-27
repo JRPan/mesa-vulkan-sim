@@ -58,6 +58,7 @@
 #include "frontend/sw_winsys.h"
 
 #include "nir.h"
+#include "lp_gpgpusim_feed.h"
 
 
 int LP_DEBUG = 0;
@@ -1076,6 +1077,12 @@ llvmpipe_create_screen(struct sw_winsys *winsys)
    LP_DEBUG = debug_get_flags_option("LP_DEBUG", lp_debug_flags, 0 );
 
    LP_PERF = debug_get_flags_option("LP_PERF", lp_perf_flags, 0 );
+
+   /* The vulkan-sim fragment feed observes only the general FS path. */
+   if (lp_gpgpusim_feed_enabled()) {
+      LP_PERF |= PERF_NO_RAST_LINEAR;
+      LP_DEBUG |= DEBUG_NO_FASTPATH;
+   }
 
    screen = CALLOC_STRUCT(llvmpipe_screen);
    if (!screen)

@@ -29,6 +29,10 @@
 #ifndef GPGPUSIM_CALLS_FROM_MESA_H
 #define GPGPUSIM_CALLS_FROM_MESA_H
 
+/* Set by lavapipe on swapchain images' pipe_resource; lets llvmpipe tell final
+ * output from render-to-texture (GPGPUSIM_SKIP_RTT). */
+#define LVP_RESOURCE_FLAG_SWAPCHAIN PIPE_RESOURCE_FLAG_FRONTEND_PRIV
+
 #include "vulkan/vulkan_core.h"
 #include "lvp_acceleration_structure.h"
 
@@ -86,4 +90,25 @@ extern void gpgpusim_savePipeCtx(void *ctx);
 extern void gpgpusim_saveUBO(unsigned stage, unsigned index, unsigned offset, unsigned size, void *addr);
 extern void gpgpusim_saveIntrinsic(unsigned StartVertex, unsigned BaseVertex, unsigned instanceCount, unsigned startInstance);
 extern void gpgpusim_saveViewport(float width, float height, float x, float y, unsigned depthcmpOp, float min_depth, float max_depth);
+extern void gpgpusim_loadFramebuffer(unsigned width, unsigned height, const float *rgba, const float *depth);
+extern void gpgpusim_getFramebuffer(unsigned *width, unsigned *height, const float **rgba, const float **depth);
+extern int gpgpusim_lastDrawRendered(void);
+extern int gpgpusim_fragmentsPending(void);
+/* Texture sampling provided by mesa for one 2x2 quad (lanes TL, TR, BL, BR); texel[lane][chan].
+ * lod_mode = 0 implicit | 1 bias | 2 explicit lod, +4 if the lod source is uniform, +8 array (r = layer), +16 cube (r = z).
+ * addr/naddr: texel addresses each lane reads (timing), texel_bytes each. */
+#define GPGPUSIM_MAX_TEXEL_ADDRS 8
+typedef void (*gpgpusim_sample_quad_fn)(unsigned texture_index, unsigned sampler_index, unsigned lod_mode,
+                                        const float s[4], const float t[4], const float r[4], const float lod[4],
+                                        float texel[4][4], uint64_t addr[4][GPGPUSIM_MAX_TEXEL_ADDRS],
+                                        unsigned naddr[4], unsigned *texel_bytes);
+extern void gpgpusim_setSampleCallback(gpgpusim_sample_quad_fn fn);
+/* Blend (+ colour mask / logic op) of one fragment into the vulkan-sim FBO pixel (float RGBA, in/out). */
+typedef void (*gpgpusim_blend_pixel_fn)(float dst[4], const float src[4]);
+extern void gpgpusim_setBlendCallback(gpgpusim_blend_pixel_fn fn);
+extern void gpgpusim_runFragments(unsigned count, const unsigned *pixels, const float *z,
+                                  const uint8_t *helper, int depth_write, unsigned num_attribs,
+                                  const char *const *ids, const unsigned *ncomp,
+                                  const float *const *values);
+extern unsigned gpgpusim_getVSOutput(const char *identifier, unsigned instance, unsigned vertex_index, float *out);
 #endif /* GPGPUSIM_CALLS_FROM_MESA_H */

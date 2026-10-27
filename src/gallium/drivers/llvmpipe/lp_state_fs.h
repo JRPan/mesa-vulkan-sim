@@ -212,6 +212,9 @@ struct lp_fragment_shader
 
    struct draw_fragment_shader *draw_data;
 
+   /* vulkan-sim: SSA NIR cloned at creation, before gallivm lowers it in place */
+   struct nir_shader *gpgpusim_nir;
+
    /* For debugging/profiling purposes */
    unsigned variant_key_size;
    unsigned no;
@@ -283,5 +286,23 @@ lp_fs_variant_reference(struct llvmpipe_context *llvmpipe,
    }
    *ptr = variant;
 }
+
+/* Blend + store of one 4x4 block for render target rt (lp_state_fs.c). */
+void
+generate_unswizzled_blend(struct gallivm_state *gallivm,
+                          unsigned rt,
+                          struct lp_fragment_shader_variant *variant,
+                          enum pipe_format out_format,
+                          unsigned int num_fs,
+                          struct lp_type fs_type,
+                          LLVMValueRef* fs_mask,
+                          LLVMValueRef fs_out_color[PIPE_MAX_COLOR_BUFS][TGSI_NUM_CHANNELS][4],
+                          LLVMTypeRef context_type,
+                          LLVMValueRef context_ptr,
+                          LLVMTypeRef color_type,
+                          LLVMValueRef color_ptr,
+                          LLVMValueRef stride,
+                          unsigned partial_mask,
+                          boolean do_branch);
 
 #endif /* LP_STATE_FS_H_ */

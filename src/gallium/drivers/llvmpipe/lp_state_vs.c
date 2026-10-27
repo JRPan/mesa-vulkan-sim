@@ -31,6 +31,8 @@
 #include "tgsi/tgsi_dump.h"
 #include "util/u_memory.h"
 #include "draw/draw_context.h"
+#include "draw/draw_vs.h"
+#include "nir.h"
 
 #include "lp_context.h"
 #include "lp_debug.h"
@@ -48,6 +50,8 @@ llvmpipe_create_vs_state(struct pipe_context *pipe,
    if (!vs) {
       return NULL;
    }
+   if (templ->type == PIPE_SHADER_IR_NIR)
+      vs->gpgpusim_nir = nir_shader_clone(NULL, vs->state.ir.nir);
 
    if (LP_DEBUG & DEBUG_TGSI && templ->type == PIPE_SHADER_IR_TGSI) {
       debug_printf("llvmpipe: Create vertex shader %p:\n", (void *) vs);
@@ -81,6 +85,7 @@ llvmpipe_delete_vs_state(struct pipe_context *pipe, void *_vs)
    struct llvmpipe_context *llvmpipe = llvmpipe_context(pipe);
    struct draw_vertex_shader *vs = (struct draw_vertex_shader *)_vs;
 
+   ralloc_free(vs->gpgpusim_nir);
    draw_delete_vertex_shader(llvmpipe->draw, vs);
 }
 

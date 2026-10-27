@@ -104,6 +104,8 @@
 #include "lp_tex_sample.h"
 #include "lp_flush.h"
 #include "lp_state_fs.h"
+#include "lp_gpgpusim_sample.h"
+#include "lp_gpgpusim_blend.h"
 #include "lp_rast.h"
 #include "nir/nir_to_tgsi_info.h"
 
@@ -2382,7 +2384,8 @@ convert_alpha(struct gallivm_state *gallivm,
  * Generates the blend function for unswizzled colour buffers
  * Also generates the read & write from colour buffer
  */
-static void
+/* non-static: also used by lp_gpgpusim_blend.c (vulkan-sim fragment feed) */
+void
 generate_unswizzled_blend(struct gallivm_state *gallivm,
                           unsigned rt,
                           struct lp_fragment_shader_variant *variant,
@@ -3990,6 +3993,7 @@ llvmpipe_create_fs_state(struct pipe_context *pipe,
       NIR_PASS_V(nir, nir_lower_fragcolor, nir->info.fs.color_is_dual_source ? 1 : 8);
 
       nir_tgsi_scan_shader(nir, &shader->info.base, true);
+      shader->gpgpusim_nir = nir_shader_clone(NULL, nir);
    }
 
    shader->draw_data = draw_create_fragment_shader(llvmpipe->draw, templ);
@@ -4100,6 +4104,9 @@ static void
 llvmpipe_remove_shader_variant(struct llvmpipe_context *lp,
                                struct lp_fragment_shader_variant *variant)
 {
+   lp_gpgpusim_sample_forget_variant(variant);
+   lp_gpgpusim_blend_forget_variant(variant);
+
    if ((LP_DEBUG & DEBUG_FS) || (gallivm_debug & GALLIVM_DEBUG_IR)) {
       debug_printf("llvmpipe: del fs #%u var %u v created %u v cached %u "
                    "v total cached %u inst %u total inst %u\n",
@@ -4139,6 +4146,7 @@ llvmpipe_destroy_fs(struct llvmpipe_context *llvmpipe,
 
    if (shader->base.ir.nir)
       ralloc_free(shader->base.ir.nir);
+   ralloc_free(shader->gpgpusim_nir);
    assert(shader->variants_cached == 0);
    FREE((void *) shader->base.tokens);
    FREE(shader);

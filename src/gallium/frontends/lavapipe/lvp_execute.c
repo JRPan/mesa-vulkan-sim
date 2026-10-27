@@ -1322,6 +1322,10 @@ static void fill_sampler_stage(struct rendering_state *state,
    ss_idx += array_idx;
    ss_idx += dyn_info->stage[stage].sampler_count;
    struct pipe_sampler_state *ss = binding->immutable_samplers ? binding->immutable_samplers[array_idx] : descriptor->sampler;
+   /* never-written descriptor (legal when the pipeline does not use it, e.g. a
+    * set that only fills some bindings of a shared layout) */
+   if (!ss)
+      return;
    state->ss[p_stage][ss_idx] = *ss;
    if (state->num_sampler_states[p_stage] <= ss_idx)
       state->num_sampler_states[p_stage] = ss_idx + 1;

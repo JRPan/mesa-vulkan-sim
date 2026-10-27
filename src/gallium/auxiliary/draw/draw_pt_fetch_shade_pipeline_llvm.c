@@ -570,6 +570,12 @@ llvm_pipeline_generic(struct draw_pt_middle_end *middle,
                                                 draw->pt.user.drawid,
                                                 draw->pt.user.viewid);
 
+      if (draw->vs_output_tap)
+         draw->vs_output_tap(draw->vs_output_tap_data, llvm_vert_info.verts,
+                             fpme->vertex_size, fetch_info->count, elts,
+                             fetch_info->linear ? fetch_info->start : 0,
+                             draw->instance_id);
+
       /* Finished with fetch and vs */
       fetch_info = NULL;
       vert_info = &llvm_vert_info;
